@@ -3,7 +3,7 @@ services:
     image: hamily/reader:latest
     container_name: reader  #容器名
     restart: always
-    stop_grace_period: 30s
+    stop_grace_period: 30s # 关容器时给 JVM 30 秒优雅停机，避免写数据时被强杀
     ports:
       - 8096:8080 # 冒号左侧端口映射可自行修改，右侧 8080 不要改
     volumes:
@@ -23,19 +23,11 @@ services:
       - READER_APP_SECURE=true #开启登录鉴权，开启后将支持多用户模式
       - READER_APP_SECUREKEY=adminpwd  #管理员密码  建议修改
       - READER_APP_INVITECODE=registercode #注册邀请码 建议修改,如不需要可注释或删除
-    healthcheck:
-      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8080/health || exit 1"]
-      interval: 30s
-      timeout: 5s
-      start_period: 60s # Spring Boot 冷启动约 20~40s
-      retries: 3
     logging:
       driver: json-file
       options:
         max-size: "10m"
         max-file: "3"
-    security_opt:
-      - no-new-privileges:true
 
   # 如需支持webview书源，打开(占用较大，不需要可加 # 注释或直接删掉)
   # 注意：hectorqin/remote-webview 已随官方删库，若拉取失败，
