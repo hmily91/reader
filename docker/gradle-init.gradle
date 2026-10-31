@@ -1,0 +1,24 @@
+// -----------------------------------------------------------------------------
+//  Gradle init 脚本：仅做「仓库地址替换」，不改动任何业务代码与依赖版本。
+//
+//  背景：cli.gradle 的 repositories 里仍声明了 jcenter()。JCenter 已于 2021 年
+//  转为只读、其后彻底下线，Gradle 一旦尝试连接会直接让构建失败（而不再是
+//  404 后回退到下一个仓库）。这里在依赖解析前把它摘掉，其余仓库
+//  （mavenCentral / jitpack / gitlab / google）按原顺序保留。
+//
+//  通过 `gradle --init-script` 注入，因此不需要修改上游的 cli.gradle。
+// -----------------------------------------------------------------------------
+
+allprojects { p ->
+    p.afterEvaluate {
+        p.repositories.removeAll { repo ->
+            try {
+                repo.hasProperty('url') &&
+                    repo.url != null &&
+                    repo.url.toString().toLowerCase().contains('jcenter')
+            } catch (ignored) {
+                false
+            }
+        }
+    }
+}
