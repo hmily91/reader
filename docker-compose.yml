@@ -1,5 +1,4 @@
-# cp .env.example .env   # 填好密码与邀请码
-# docker compose up -d   # 更新镜像：docker compose pull && docker compose up -d
+# 更新镜像：docker compose pull && docker compose up -d
 
 services:
   reader:
@@ -10,7 +9,7 @@ services:
 
     ports:
       # 右侧 8080 是容器内固定端口，不要改
-      - "${READER_PORT:-4396}:8080"
+      - "8096:8080"
 
     environment:
       TZ: Asia/Shanghai
@@ -26,18 +25,19 @@ services:
         -XX:MaxRAMPercentage=75.0
         -XX:+ExitOnOutOfMemoryError
 
+      READER_APP_USERLIMIT: 10
+      READER_APP_USERBOOKLIMIT: 1000
+      READER_APP_CACHECHAPTERCONTENT: "true"
+      READER_APP_REMOTEWEBVIEWAPI: http://readerwebview:8050
+
       # 鉴权：上游默认 secure=false（完全无鉴权），必须显式开启
       READER_APP_SECURE: "true"
-      READER_APP_SECUREKEY: ${READER_SECURE_KEY:?请在 .env 中设置 READER_SECURE_KEY}
-      READER_APP_INVITECODE: ${READER_INVITE_CODE:?请在 .env 中设置 READER_INVITE_CODE}
-
-      READER_APP_USERLIMIT: ${READER_USER_LIMIT:-50}
-      READER_APP_USERBOOKLIMIT: ${READER_USER_BOOK_LIMIT:-200}
-      READER_APP_CACHECHAPTERCONTENT: "true"
+      READER_APP_SECUREKEY: adminpwd
+      READER_APP_INVITECODE: registercode
 
     volumes:
-      - ./storage:/storage
-      - ./logs:/logs
+      - /share/Container/reader/logs:/logs
+      - /share/Container/reader/storage:/storage
 
     # /health 为应用内免鉴权端点；start_period 覆盖 Spring Boot 冷启动
     healthcheck:
@@ -58,3 +58,14 @@ services:
     cap_drop:
       - NET_RAW
       - MKNOD
+
+  # webview 书源容器。hectorqin/remote-webview 已随官方删库，若拉取失败，
+  # 把本服务与 reader 的 READER_APP_REMOTEWEBVIEWAPI 一起注释掉
+  readerwebview:
+    image: hectorqin/remote-webview
+    container_name: readerwebview
+    restart: unless-stopped
+    environment:
+      - TZ=Asia/Shanghai
+    security_opt:
+      - no-new-privileges:true
