@@ -1,3 +1,4 @@
+# 上游原有条目（保留）
 HELP.md
 .gradle
 build/
@@ -31,16 +32,38 @@ out/
 ### VS Code ###
 .vscode/
 
-
 .vertx
 out
 
-#/src/main/resources/application-prod.yml
-/src/main/resources/application-default.yml
+#/src/main/resources/application-default.yml
 
+# 前端产物由镜像内构建，不进构建上下文
 /src/main/resources/web
 /storage*
 /logs
 /bin
 /file-uploads
 node_modules
+
+# --- 复刻镜像新增：进一步压缩构建上下文 -----------------------------------
+# 文档与素材（几十 MB，构建完全用不到）
+assets
+imgs
+docs
+*.md
+!README.md
+# CI 与容器编排（防止把 compose 里的路径带进镜像层）
+.github
+.dockerignore
+docker-compose.yml
+docker-compose.yaml
+.env
+.env.example
+# 其它 Dockerfile 变体与本镜像无关的脚本
+Dockerfile.openj9
+Dockerfile.slim
+Dockerfile.source
+build.sh
+reader.sh
+nixpacks.toml
+vetur.config.js
