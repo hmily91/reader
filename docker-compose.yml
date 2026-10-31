@@ -1,107 +1,45 @@
-# =============================================================================
-#  reader（阅读3 服务端）部署编排
-#
-#  基线：上游 changshengyu/reader-dev 的 docker-compose.yml
-#  本文件在其基础上做的每一处改动，都用 【优化 N】 标注，原因见文末对照说明。
-#
-#  用法：
-#    cp .env.example .env   # 填好密码/邀请码（.env 不要提交进 git）
-#    docker compose up -d
-#    浏览器打开 http://<your-host>:${READER_PORT:-4396}
-#
-#  注：本次未提供你此前实际部署用的 compose，因此以下基线取自上游仓库自带的
-#      docker-compose.yml。若你的旧配置在端口/卷路径上有差异，把对应值改回即可，
-#      其余优化项可原样套用。
-# =============================================================================
+# cp .env.example .env   # 填好密码与邀请码
+# docker compose up -d   # 更新镜像：docker compose pull && docker compose up -d
 
 services:
   reader:
-    # 【优化 1】上游 image 指向 hectorqin/reader:openj9-latest，官方仓库已删库、
-    #          镜像不可拉取；改为自建复刻镜像，并把版本钉死（不再依赖 floating
-    #          tag，保证可重复升级与回滚）。升级时改这里的版本号即可。
-    image: ${READER_IMAGE:-${DOCKERHUB_USER}/reader:2.5.4}
-
-    # 如需从源码构建（而非拉取已发布镜像），打开下面三行：
-    # build:
-    #   context: .
-    #   dockerfile: Dockerfile
-
+    image: ${DOCKERHUB_USER}/reader:latest
     container_name: reader
-
-    # 【优化 2】上游是 restart: always。always 会在「你手动 docker stop」之后
-    #          仍被守护进程重新拉起，维护时很反直觉；unless-stopped 保留崩溃/
-    #          重启宿主机后自愈，但尊重人工停止。
     restart: unless-stopped
-
-    # 【优化 3】上游没有这段。JVM 冷启动（Spring Boot 2.1 + Vert.x）通常需要
-    #          20~40s，没有 start_period 会在启动阶段被误判 unhealthy 并触发
-    #          编排器的重启策略；stop_grace_period 给 Spring 优雅停机留足时间，
-    #          避免在写书库/用户数据时被 SIGKILL 打断。
     stop_grace_period: 30s
 
     ports:
-      # 左侧宿主机端口可改；右侧 8080 是容器内部固定端口，不要改
-      # （改了要同步改 READER_SERVER_PORT，否则 /health 探测会打空）
+      # 右侧 8080 是容器内固定端口，不要改
       - "${READER_PORT:-4396}:8080"
 
     environment:
-      # ---- 时区与语言 ------------------------------------------------------
-      # 【优化 4】上游没有 TZ。JVM 默认按 UTC 取时间，日志与阅读进度时间戳会
-      #          比北京时间晚 8 小时；镜像里已内置 tzdata，这里显式声明更直观。
       TZ: Asia/Shanghai
       LANG: C.UTF-8
-
-      # ---- Spring profile -------------------------------------------------
-      # prod：日志写入 /logs（按天+100MB 滚动）。
-      # 若希望 `docker compose logs` 直接看到日志，改成 default（日志走 stdout）。
       SPRING_PROFILES_ACTIVE: prod
 
-      # ---- 数据落盘路径（显式写出，避免依赖容器工作目录）--------------------
-      # 【优化 5】上游靠「工作目录为 /」让相对路径 ./storage、./logs 恰好落到
-      #          挂载点上，属于隐式约定；这里显式声明，换工作目录也不会丢数据。
       READER_APP_STORAGEPATH: /storage
       LOGGING_PATH: /logs
 
-      # ---- JVM 参数 -------------------------------------------------------
-      # 【优化 6】上游完全没有 JVM 参数，容器里 JVM 读的是宿主机内存上限，
-      #          极易 OOM 或被 cgroup 杀掉。UseContainerSupport 让 JVM 按容器
-      #          limit 计算堆；MaxRAMPercentage 取 75% 留给堆外（Vert.x/
-      #          Netty 直接内存 + 元空间）。内存紧张可下调到 60。
+      # JVM：按容器内存上限分配堆，剩 25% 留给堆外
       JAVA_OPTS: >-
         -XX:+UseContainerSupport
         -XX:MaxRAMPercentage=75.0
         -XX:+ExitOnOutOfMemoryError
 
-      # 【优化 7】JVM 内存硬上限，配合上面的百分比做兜底，防止无 cgroup limit
-      #          的环境把宿主机内存吃干。按你的机器调整。
-      # JAVA_OPTS: "-XX:+UseContainerSupport -Xmx512m -XX:+ExitOnOutOfMemoryError"
-
-      # ---- 鉴权（上游安全相关默认值必须显式写出并覆盖）----------------------
-      # 【优化 8】上游 application.yml 里 reader.app.secure 默认是 false，
-      #          即「完全无鉴权」：任何人访问到端口就能读写全部书架与书源。
-      #          secureKey 默认 ""、inviteCode 默认 "" 同样是放空状态。
-      #          这里显式打开并强制要求从 .env 提供，缺值 compose 直接拒绝启动。
+      # 鉴权：上游默认 secure=false（完全无鉴权），必须显式开启
       READER_APP_SECURE: "true"
-      READER_APP_SECUREKEY: ${READER_SECURE_KEY:?请在 .env 中设置 READER_SECURE_KEY（管理员密码）}
-      READER_APP_INVITECODE: ${READER_INVITE_CODE:?请在 .env 中设置 READER_INVITE_CODE（注册邀请码）}
+      READER_APP_SECUREKEY: ${READER_SECURE_KEY:?请在 .env 中设置 READER_SECURE_KEY}
+      READER_APP_INVITECODE: ${READER_INVITE_CODE:?请在 .env 中设置 READER_INVITE_CODE}
 
-      # ---- 业务配额（沿用上游默认值，显式列出便于调整）----------------------
-      READER_APP_USERLIMIT: ${READER_USER_LIMIT:-50}          # 用户上限，代码里 max 50
-      READER_APP_USERBOOKLIMIT: ${READER_USER_BOOK_LIMIT:-200} # 每人书籍上限
-      READER_APP_CACHECHAPTERCONTENT: "true"                   # 缓存章节内容
-
-      # webview 书源依赖额外容器，默认关闭；开启见下方 readerwebview 注释块
-      # READER_APP_REMOTEWEBVIEWAPI: http://readerwebview:8050
+      READER_APP_USERLIMIT: ${READER_USER_LIMIT:-50}
+      READER_APP_USERBOOKLIMIT: ${READER_USER_BOOK_LIMIT:-200}
+      READER_APP_CACHECHAPTERCONTENT: "true"
 
     volumes:
-      # 【优化 9】上游写死 /home/reader/logs、/home/reader/storage 绝对路径。
-      #          改成相对 ./ 让整套配置可整体搬家/Git 化；两份数据都必须是 rw，
-      #          SQLite 书库与索引要写入。首次启动会自动创建。
       - ./storage:/storage
       - ./logs:/logs
 
-    # 【优化 10】上游没有健康检查。/health 是 RestVerticle 中的免鉴权端点
-      #          （返回 "ok!"），适合做存活探测；start_period 覆盖冷启动。
+    # /health 为应用内免鉴权端点；start_period 覆盖 Spring Boot 冷启动
     healthcheck:
       test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8080/health || exit 1"]
       interval: 30s
@@ -109,52 +47,14 @@ services:
       start_period: 60s
       retries: 3
 
-    # 【优化 11】上游没有日志上限。prod profile 下应用日志虽然会按天+100MB
-      #          滚动落盘，但 stdout 仍会被 docker 的 json-file driver 无限累积。
-      logging:
-        driver: json-file
-        options:
-          max-size: "10m"
-          max-file: "3"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
-    # 【优化 12】上游没有安全加固项。no-new-privileges 阻断 setuid 提权路径；
-      #          cap_drop 去掉容器默认能力中 reader 完全用不到的部分。
-      #          （不要直接写 user:，挂载目录属主需要 entrypoint 以 root 修一次。）
     security_opt:
       - no-new-privileges:true
     cap_drop:
       - NET_RAW
       - MKNOD
-
-    # 供 .env 之外的运行时覆盖使用；留空不影响
-    # env_file:
-    #   - .env
-
-# -----------------------------------------------------------------------------
-#  可选：webview 书源容器（占用较大，默认关闭）
-#  打开后需同步取消上面 READER_APP_REMOTEWEBVIEWAPI 的注释。
-# -----------------------------------------------------------------------------
-#  readerwebview:
-#    image: hectorqin/remote-webview
-#    container_name: readerwebview
-#    restart: unless-stopped
-#    environment:
-#      - TZ=Asia/Shanghai
-#    security_opt:
-#      - no-new-privileges:true
-
-# -----------------------------------------------------------------------------
-#  可选：自动更新镜像（默认关闭）
-#  【优化 13】上游默认带着 watchtower 并把 /var/run/docker.sock 挂进容器 ——
-#            那等价于把宿主机 root 交给一个常驻进程，且会自动拉取 latest 覆盖
-#            你钉死的版本。这里注释掉：需要时手动打开，并改用定时 + 显式清理。
-# -----------------------------------------------------------------------------
-#  watchtower:
-#    image: containrrr/watchtower
-#    container_name: watchtower
-#    restart: unless-stopped
-#    environment:
-#      - TZ=Asia/Shanghai
-#    volumes:
-#      - /var/run/docker.sock:/var/run/docker.sock
-#    command: reader --cleanup --schedule "0 0 4 * * *"
