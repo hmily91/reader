@@ -1,71 +1,48 @@
-# 更新镜像：docker compose pull && docker compose up -d
-
 services:
   reader:
-    image: ${DOCKERHUB_USER}/reader:latest
-    container_name: reader
-    restart: unless-stopped
+    image: hamily/reader:latest
+    container_name: reader  #容器名
+    restart: always
     stop_grace_period: 30s
-
     ports:
-      # 右侧 8080 是容器内固定端口，不要改
-      - "8096:8080"
-
-    environment:
-      TZ: Asia/Shanghai
-      LANG: C.UTF-8
-      SPRING_PROFILES_ACTIVE: prod
-
-      READER_APP_STORAGEPATH: /storage
-      LOGGING_PATH: /logs
-
-      # JVM：按容器内存上限分配堆，剩 25% 留给堆外
-      JAVA_OPTS: >-
-        -XX:+UseContainerSupport
-        -XX:MaxRAMPercentage=75.0
-        -XX:+ExitOnOutOfMemoryError
-
-      READER_APP_USERLIMIT: 10
-      READER_APP_USERBOOKLIMIT: 1000
-      READER_APP_CACHECHAPTERCONTENT: "true"
-      READER_APP_REMOTEWEBVIEWAPI: http://readerwebview:8050
-
-      # 鉴权：上游默认 secure=false（完全无鉴权），必须显式开启
-      READER_APP_SECURE: "true"
-      READER_APP_SECUREKEY: adminpwd
-      READER_APP_INVITECODE: registercode
-
+      - 8096:8080 # 冒号左侧端口映射可自行修改，右侧 8080 不要改
     volumes:
-      - /share/Container/reader/logs:/logs
-      - /share/Container/reader/storage:/storage
-
-    # /health 为应用内免鉴权端点；start_period 覆盖 Spring Boot 冷启动
+      - /share/Container/reader/logs:/logs  # log映射目录可自行修改
+      - /share/Container/reader/storage:/storage # 数据映射目录可自行修改
+    environment:
+      - TZ=Asia/Shanghai
+      - SPRING_PROFILES_ACTIVE=prod
+      - READER_APP_STORAGEPATH=/storage  # 必须显式指定，否则数据会落到容器内 /app 而非挂载卷
+      - LOGGING_PATH=/logs
+      - JAVA_OPTS=-XX:+UseContainerSupport -XX:MaxRAMPercentage=75.0 -XX:+ExitOnOutOfMemoryError
+      - READER_APP_USERLIMIT=10  # 用户上限,默认且最大值为50
+      - READER_APP_USERBOOKLIMIT=1000  # 用户书籍上限,默认200
+      - READER_APP_CACHECHAPTERCONTENT=true # 开启缓存章节内容
+      - READER_APP_REMOTEWEBVIEWAPI=http://readerwebview:8050 #启用webview(若下方readerwebview容器不开启需注释此行
+      # ↓多用户模式配置↓
+      - READER_APP_SECURE=true #开启登录鉴权，开启后将支持多用户模式
+      - READER_APP_SECUREKEY=adminpwd  #管理员密码  建议修改
+      - READER_APP_INVITECODE=registercode #注册邀请码 建议修改,如不需要可注释或删除
     healthcheck:
       test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8080/health || exit 1"]
       interval: 30s
       timeout: 5s
-      start_period: 60s
+      start_period: 60s # Spring Boot 冷启动约 20~40s
       retries: 3
-
     logging:
       driver: json-file
       options:
         max-size: "10m"
         max-file: "3"
-
     security_opt:
       - no-new-privileges:true
-    cap_drop:
-      - NET_RAW
-      - MKNOD
 
-  # webview 书源容器。hectorqin/remote-webview 已随官方删库，若拉取失败，
-  # 把本服务与 reader 的 READER_APP_REMOTEWEBVIEWAPI 一起注释掉
+  # 如需支持webview书源，打开(占用较大，不需要可加 # 注释或直接删掉)
+  # 注意：hectorqin/remote-webview 已随官方删库，若拉取失败，
+  # 把本服务与上方的 READER_APP_REMOTEWEBVIEWAPI 一起注释掉
   readerwebview:
     image: hectorqin/remote-webview
     container_name: readerwebview
-    restart: unless-stopped
+    restart: always
     environment:
       - TZ=Asia/Shanghai
-    security_opt:
-      - no-new-privileges:true
