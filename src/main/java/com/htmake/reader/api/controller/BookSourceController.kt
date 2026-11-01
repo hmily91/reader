@@ -125,12 +125,7 @@ class BookSourceController(coroutineContext: CoroutineContext): BaseController(c
 
     /** 从请求体中读取管理员提交的授权用户列表（shareUsers），不存在时返回 null 表示不变更授权 */
     fun getShareUsersFromBody(context: RoutingContext): MutableList<String>? {
-        var body: JsonObject? = null
-        try {
-            body = context.bodyAsJson
-        } catch (e: Exception) {
-            return null
-        }
+        var body = getBodyJsonObject(context)
         if (body == null) {
             return null
         }
@@ -239,8 +234,8 @@ class BookSourceController(coroutineContext: CoroutineContext): BaseController(c
         if (!isAdmin(context)) {
             return returnData.setData("NEED_ADMIN").setErrorMsg("无权限操作：仅管理员可导入书源")
         }
-        var body = context.bodyAsJson
-        var bookSourceJsonArray: JsonArray? = context.bodyAsJsonArray
+        var body = getBodyJsonObject(context)
+        var bookSourceJsonArray: JsonArray? = getBodyJsonArray(context)
         if (bookSourceJsonArray == null && body != null) {
             // 兼容 { sources: [...], shareUsers: [...] } 形式
             bookSourceJsonArray = body.getJsonArray("sources")
@@ -290,7 +285,7 @@ class BookSourceController(coroutineContext: CoroutineContext): BaseController(c
         var bookSourceUrl: String
         if (context.request().method() == HttpMethod.POST) {
             // post 请求
-            bookSourceUrl = context.bodyAsJson.getString("bookSourceUrl")
+            bookSourceUrl = getBodyJsonObject(context)?.getString("bookSourceUrl") ?: ""
         } else {
             // get 请求
             bookSourceUrl = context.queryParam("bookSourceUrl").firstOrNull() ?: ""
@@ -326,7 +321,7 @@ class BookSourceController(coroutineContext: CoroutineContext): BaseController(c
         var simple: Int = 0
         if (context.request().method() == HttpMethod.POST) {
             // post 请求
-            simple = context.bodyAsJson.getInteger("simple", 0)
+            simple = getBodyJsonObject(context)?.getInteger("simple", 0) ?: 0
         } else {
             // get 请求
             simple = context.queryParam("simple").firstOrNull()?.toInt() ?: 0
@@ -366,7 +361,7 @@ class BookSourceController(coroutineContext: CoroutineContext): BaseController(c
         if (!isAdmin(context)) {
             return returnData.setData("NEED_ADMIN").setErrorMsg("无权限操作：仅管理员可删除书源")
         }
-        var body = context.bodyAsJson
+        var body = getBodyJsonObject(context)
         if (body == null) {
             return returnData.setErrorMsg("参数错误")
         }
@@ -395,7 +390,7 @@ class BookSourceController(coroutineContext: CoroutineContext): BaseController(c
         if (!isAdmin(context)) {
             return returnData.setData("NEED_ADMIN").setErrorMsg("无权限操作：仅管理员可删除书源")
         }
-        val bookSourceJsonArray = context.bodyAsJsonArray
+        val bookSourceJsonArray = getBodyJsonArray(context)
         if (bookSourceJsonArray == null) {
             return returnData.setErrorMsg("参数错误")
         }
@@ -445,7 +440,7 @@ class BookSourceController(coroutineContext: CoroutineContext): BaseController(c
         if (!isAdmin(context)) {
             return returnData.setData("NEED_ADMIN").setErrorMsg("无权限操作：仅管理员可设置书源授权")
         }
-        var username = context.bodyAsJson.getString("username") ?: ""
+        var username = getBodyJsonObject(context)?.getString("username") ?: ""
         if (username.isEmpty()) {
             return returnData.setErrorMsg("参数错误")
         }
@@ -490,7 +485,7 @@ class BookSourceController(coroutineContext: CoroutineContext): BaseController(c
         var url: String
         if (context.request().method() == HttpMethod.POST) {
             // post 请求
-            url = context.bodyAsJson.getString("url") ?: ""
+            url = getBodyJsonObject(context)?.getString("url") ?: ""
         } else {
             // get 请求
             url = context.queryParam("url").firstOrNull() ?: ""
@@ -520,7 +515,7 @@ class BookSourceController(coroutineContext: CoroutineContext): BaseController(c
         if (!isAdmin(context)) {
             return returnData.setData("NEED_ADMIN").setErrorMsg("无权限操作：仅管理员可删除用户书源")
         }
-        val userJsonArray = context.bodyAsJsonArray
+        val userJsonArray = getBodyJsonArray(context)
         if (userJsonArray == null) {
             return returnData.setErrorMsg("参数错误")
         }
@@ -576,7 +571,7 @@ class BookSourceController(coroutineContext: CoroutineContext): BaseController(c
         if (!isAdmin(context)) {
             return returnData.setData("NEED_ADMIN").setErrorMsg("无权限操作：仅管理员可设置书源授权")
         }
-        var body = context.bodyAsJson
+        var body = getBodyJsonObject(context)
         if (body == null) {
             return returnData.setErrorMsg("参数错误")
         }
