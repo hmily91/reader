@@ -126,6 +126,7 @@ class YueduApi : RestVerticle() {
 
         // 获取系统信息
         router.get("/reader3/getSystemInfo").coroutineHandler { getSystemInfo(it) }
+        router.get("/reader3/getUpdateLog").coroutineHandler { getUpdateLog(it) }
 
 
         ////////// 接口部分
@@ -551,6 +552,37 @@ class YueduApi : RestVerticle() {
             "totalMemory" to totalMemory,
             "maxMemory" to maxMemory
         ))
+    }
+
+    /**
+     * 更新日志
+     * 优先读取 storage/data/updateLog.json（无需重新构建镜像即可维护），
+     * 不存在时回退到 jar 内置的 src/main/resources/updateLog.json
+     */
+    private suspend fun getUpdateLog(context: RoutingContext): ReturnData {
+        val returnData = ReturnData()
+        var logJson: JsonObject? = asJsonObject(getStorage("data", "updateLog"))
+        if (logJson == null) {
+            logJson = loadDefaultUpdateLog()
+        }
+        if (logJson == null) {
+            return returnData.setData(mapOf("items" to listOf<Map<String, Any>>()))
+        }
+        return returnData.setData(logJson.map)
+    }
+
+    private fun loadDefaultUpdateLog(): JsonObject? {
+        return try {
+            val stream = YueduApi::class.java.getResourceAsStream("/updateLog.json")
+            if (stream == null) {
+                null
+            } else {
+                JsonObject(String(stream.readBytes(), Charsets.UTF_8))
+            }
+        } catch (e: Exception) {
+            logger.error("读取内置更新日志失败: " + e.message)
+            null
+        }
     }
 
     /**
