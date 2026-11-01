@@ -282,15 +282,12 @@ class BookSourceController(coroutineContext: CoroutineContext): BaseController(c
     suspend fun getBookSource(context: RoutingContext): ReturnData {
         val returnData = ReturnData()
         checkAuth(context)
-        var bookSourceUrl: String
-        if (context.request().method() == HttpMethod.POST) {
-            // post 请求
+        // 同时兼容 query 参数和 post 请求体两种方式取书源链接
+        var bookSourceUrl = context.queryParam("bookSourceUrl").firstOrNull() ?: ""
+        if (bookSourceUrl.isEmpty()) {
             bookSourceUrl = getBodyJsonObject(context)?.getString("bookSourceUrl") ?: ""
-        } else {
-            // get 请求
-            bookSourceUrl = context.queryParam("bookSourceUrl").firstOrNull() ?: ""
         }
-        if (bookSourceUrl.isNullOrEmpty()) {
+        if (bookSourceUrl.isEmpty()) {
             return returnData.setErrorMsg("书源链接不能为空")
         }
 
