@@ -9,5 +9,6 @@ data class User(
         var created_at: Long = System.currentTimeMillis(),
         var enable_webdav: Boolean = false, // 是否开启 WebDAV 功能
         var token_map: Map<String, Long>? = null,
-        var enable_local_store: Boolean = false // 是否开启本地书仓功能
+        var enable_local_store: Boolean = false, // 是否开启本地书仓功能
+        var role: String = "user" // 用户角色: admin=管理员, user=普通用户
 )
