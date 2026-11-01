@@ -134,6 +134,10 @@ class UserController(coroutineContext: CoroutineContext): BaseController(corouti
             var salt = getRandomString(8)
             var passwordEncrypted = genEncryptedPassword(password, salt)
             var newUser = User(username, passwordEncrypted, salt)
+            // 第一个注册的用户自动成为管理员，保证系统始终有管理员可管理书源
+            if (userMap.keys.size <= 0) {
+                newUser.role = "admin"
+            }
 
             val loginData = saveUserSession(context, userMap, newUser)
             return returnData.setData(loginData)
@@ -210,8 +214,9 @@ class UserController(coroutineContext: CoroutineContext): BaseController(corouti
         if (!appConfig.secure || appConfig.secureKey.isEmpty()) {
             return returnData.setErrorMsg("不支持的操作")
         }
-        if (!checkManagerAuth(context)) {
-            return returnData.setData("NEED_SECURE_KEY").setErrorMsg("请输入管理密码")
+        // 管理员（管理密码或 admin 角色）可查看用户列表，用于书源授权选择
+        if (!isAdmin(context)) {
+            return returnData.setData("NEED_SECURE_KEY").setErrorMsg("无权限操作：仅管理员可查看用户列表")
         }
         var userMap = mutableMapOf<String, MutableMap<String, Any>>()
         var userMapJson: JsonObject? = asJsonObject(getStorage("data", "users"))
@@ -386,8 +391,12 @@ class UserController(coroutineContext: CoroutineContext): BaseController(corouti
         val username = context.bodyAsJson.getString("username") ?: ""
         val enableWebdav = context.bodyAsJson.getBoolean("enableWebdav")
         val enableLocalStore = context.bodyAsJson.getBoolean("enableLocalStore")
+        val role = context.bodyAsJson.getString("role")
         if (username.isEmpty()) {
             return returnData.setErrorMsg("参数错误")
+        }
+        if (role != null && !role.equals("admin") && !role.equals("user")) {
+            return returnData.setErrorMsg("角色参数错误")
         }
 
         var userMap = mutableMapOf<String, MutableMap<String, Any>>()
@@ -404,6 +413,9 @@ class UserController(coroutineContext: CoroutineContext): BaseController(corouti
             }
             if (enableLocalStore != null) {
                 existedUser.put("enable_local_store", enableLocalStore)
+            }
+            if (role != null) {
+                existedUser.put("role", role)
             }
             userMap.put(username, existedUser)
             saveStorage("data", "users", value = userMap)
