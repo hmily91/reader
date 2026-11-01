@@ -141,7 +141,7 @@
           <div class="setting-title">
             后端设定
           </div>
-          <div class="setting-item setting-item-inline">
+          <div class="setting-item">
             <el-tag
               :type="connectType"
               :effect="isNight ? 'dark' : 'light'"
@@ -150,14 +150,6 @@
               @click="setIP"
             >
               {{ connectStatus }}
-            </el-tag>
-            <el-tag
-              type="info"
-              :effect="isNight ? 'dark' : 'light'"
-              class="setting-btn"
-              @click="showUpdateLog"
-            >
-              更新日志
             </el-tag>
           </div>
         </div>
@@ -1145,6 +1137,17 @@ import Vue from "vue";
 // 后端不可用时兜底展示的更新日志（与 src/main/resources/updateLog.json 保持一致）
 const DEFAULT_UPDATE_LOG = [
   {
+    version: "2.6.5",
+    date: "2026-11-01",
+    contents: [
+      "修复「书源管理 → 编辑」提示「书源链接不能为空」：请求体解析方法改用 Vert.x 原生读取 + 兜底解析",
+      "书源详情接口同时支持从 URL 参数或请求体取书源链接，不再依赖单一来源",
+      "去掉侧边栏「更新日志」入口（点左上角版本号仍可查看）",
+      "版本号不再拼接构建时间后缀（如 -11011246），只显示 v2.6.5",
+      "更新日志弹窗：日期移到右侧，与版本号分开"
+    ]
+  },
+  {
     version: "2.6.4",
     date: "2026-11-01",
     contents: [
@@ -1169,7 +1172,7 @@ const DEFAULT_UPDATE_LOG = [
       "修复书源授权「保存后不生效」：授权表落盘时被写成 {\"list\":[...]} 格式，再读回来解析不到用户名",
       "修复书源列表 shareUsers 返回格式错误，导致「授权用户」列一直显示「仅管理员」、编辑页勾选也不回显",
       "书源接口返回值改为标准 JSON 对象（原来会多包一层 map / list）",
-      "侧边栏「更新日志」与「后端已连接」标签对齐"
+      "（2.6.5 起该入口已移除，改为点击左上角版本号查看）"
     ]
   },
   {
@@ -3848,6 +3851,7 @@ export default {
       display: flex;
       flex-direction: row;
       align-items: center;
+      justify-content: space-between;
       margin-bottom: 4px;
     }
 
@@ -3860,6 +3864,8 @@ export default {
     .update-log-date {
       font-size: 12px;
       color: #909399;
+      margin-left: auto;
+      flex-shrink: 0;
     }
 
     .update-log-list {
