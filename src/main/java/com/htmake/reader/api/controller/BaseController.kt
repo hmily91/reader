@@ -268,8 +268,149 @@ open class BaseController(override val coroutineContext: CoroutineContext): Coro
             "accessToken" to user.username + ":" + user.token,
             "enableWebdav" to user.enable_webdav,
             "enableLocalStore" to user.enable_local_store,
+            "role" to (if (user.role.isEmpty()) "user" else user.role),
             "createdAt" to user.created_at
         )
+    }
+
+    // ==================== 书源权限与用户授权（新增） ====================
+
+    /**
+     * 判断当前请求是否具备管理员权限
+     * 1. 未开启鉴权（secure=false）时，所有人视为管理员
+     * 2. 携带正确管理密码（管理模式）的请求视为管理员
+     * 3. 登录用户角色为 admin 时视为管理员
+     */
+    fun isAdmin(context: RoutingContext): Boolean {
+        if (!appConfig.secure) {
+            return true
+        }
+        if (appConfig.secureKey.isNotEmpty()) {
+            var secureKey = context.queryParam("secureKey").firstOrNull() ?: ""
+            if (secureKey.isNotEmpty() && secureKey.equals(appConfig.secureKey)) {
+                return true
+            }
+        }
+        var username = context.get("username") as String?
+        if (username.isNullOrEmpty()) {
+            username = context.session().get("username") as String?
+        }
+        if (username.isNullOrEmpty()) {
+            return false
+        }
+        var user = getUserInfoClass(username)
+        if (user == null) {
+            return false
+        }
+        return user.role.equals("admin")
+    }
+
+    /** 指定命名空间（用户名）是否为管理员：default 与 admin 角色可见全部书源 */
+    fun isAdminUserNameSpace(userNameSpace: String): Boolean {
+        if (!appConfig.secure) {
+            return true
+        }
+        if (userNameSpace.isEmpty() || userNameSpace.equals("default")) {
+            return true
+        }
+        var user = getUserInfoClass(userNameSpace)
+        if (user == null) {
+            return false
+        }
+        return user.role.equals("admin")
+    }
+
+    /** 书源授权表：bookSourceUrl -> 授权用户名列表，持久化在 storage/data/bookSourceGrants.json */
+    fun getBookSourceGrantMap(): MutableMap<String, MutableList<String>> {
+        var grantMap = mutableMapOf<String, MutableList<String>>()
+        var grantJson: JsonObject? = asJsonObject(getStorage("data", "bookSourceGrants"))
+        if (grantJson != null) {
+            grantJson.forEach {
+                var url = it.key
+                var userList = mutableListOf<String>()
+                var value = it.value
+                if (value is JsonArray) {
+                    for (i in 0 until value.size()) {
+                        var username = value.getString(i)
+                        if (!username.isNullOrEmpty()) {
+                            userList.add(username)
+                        }
+                    }
+                } else if (value is String && value.isNotEmpty()) {
+                    userList.add(value)
+                }
+                if (url.isNotEmpty()) {
+                    grantMap.put(url, userList)
+                }
+            }
+        }
+        return grantMap
+    }
+
+    /** 保存书源授权表 */
+    fun saveBookSourceGrantMap(grantMap: Map<String, List<String>>) {
+        var grantJson = JsonObject()
+        grantMap.forEach {
+            if (it.key.isNotEmpty()) {
+                var userArray = JsonArray()
+                for (name in it.value) {
+                    if (name.isNotEmpty()) {
+                        userArray.add(name)
+                    }
+                }
+                grantJson.put(it.key, userArray)
+            }
+        }
+        saveStorage("data", "bookSourceGrants", value = grantJson.map)
+    }
+
+    /** 系统书源（管理员维护的唯一数据源），位于 storage/data/default/bookSource.json */
+    fun getSystemBookSourceJson(): JsonArray {
+        var bookSourceList: JsonArray? = asJsonArray(getStorage("data", "default", "bookSource"))
+        if (bookSourceList == null) {
+            bookSourceList = JsonArray()
+        }
+        return bookSourceList
+    }
+
+    /** 把用户名列表转成 JsonArray */
+    fun toUserJsonArray(userList: List<String>?): JsonArray {
+        var userArray = JsonArray()
+        if (userList != null) {
+            for (name in userList) {
+                if (name.isNotEmpty()) {
+                    userArray.add(name)
+                }
+            }
+        }
+        return userArray
+    }
+
+    /** 按授权关系过滤出指定用户可见的书源 */
+    fun filterVisibleBookSource(bookSourceList: JsonArray, userNameSpace: String): JsonArray {
+        if (!appConfig.secure) {
+            return bookSourceList
+        }
+        if (isAdminUserNameSpace(userNameSpace)) {
+            return bookSourceList
+        }
+        var grantMap = getBookSourceGrantMap()
+        var result = JsonArray()
+        for (i in 0 until bookSourceList.size()) {
+            var bookSourceObject = bookSourceList.getJsonObject(i)
+            if (bookSourceObject == null) {
+                continue
+            }
+            var bookSourceUrl = bookSourceObject.getString("bookSourceUrl") ?: ""
+            if (bookSourceUrl.isEmpty()) {
+                continue
+            }
+            var userList = grantMap.get(bookSourceUrl)
+            if (userList != null && userList.contains(userNameSpace)) {
+                result.add(bookSourceObject)
+            }
+        }
+        return result
     }
 
     fun getUserWebdavHome(context: Any): String {
