@@ -290,7 +290,7 @@ class BookSourceController(coroutineContext: CoroutineContext): BaseController(c
             bookSourceObject.put("shareUsers", toUserJsonArray(grantMap.get(bookSourceUrl)))
         }
         // 深拷贝成普通 Map，避免 Jackson 把 JsonObject 序列化成 {"map":...}
-        return returnData.setData(toPlainValue(bookSourceObject))
+        return returnData.setData(toPlainData(bookSourceObject))
     }
 
     suspend fun getBookSources(context: RoutingContext): ReturnData {
@@ -326,7 +326,7 @@ class BookSourceController(coroutineContext: CoroutineContext): BaseController(c
                 return returnData.setData(simpleList)
             }
             // 深拷贝成普通 List<Map>，避免 Jackson 把 JsonObject 序列化成 {"map":...}
-            return returnData.setData(toPlainValue(list))
+            return returnData.setData(toPlainData(list))
         }
         return returnData.setData(arrayListOf<Int>())
     }
