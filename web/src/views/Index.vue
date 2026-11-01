@@ -732,13 +732,13 @@
         <span class="el-dialog__title"
           >{{ isShowFailureBookSource ? "失效书源管理" : "书源管理" }}
           <span
-            v-if="!isShowFailureBookSource"
+            v-if="!isShowFailureBookSource && isAdmin"
             class="float-right span-btn"
             @click="deleteAllBookSource()"
             >清空</span
           >
           <span
-            v-if="!isShowFailureBookSource"
+            v-if="!isShowFailureBookSource && isAdmin"
             class="float-right span-btn"
             @click="deleteBookSourceFile()"
             >恢复默认</span
@@ -750,7 +750,7 @@
             >导出</span
           >
           <span
-            v-if="!isShowFailureBookSource"
+            v-if="!isShowFailureBookSource && isAdmin"
             class="float-right span-btn"
             @click="editBookSource(false)"
             >新增</span
@@ -837,6 +837,16 @@
             min-width="120"
             v-if="isShowFailureBookSource"
           ></el-table-column>
+          <el-table-column
+            v-if="isAdmin && !isShowFailureBookSource"
+            property="shareUsers"
+            label="授权用户"
+            min-width="140"
+          >
+            <template slot-scope="scope">
+              <span>{{ showShareUsers(scope.row) }}</span>
+            </template>
+          </el-table-column>
           <el-table-column label="书架书籍" min-width="120">
             <template slot-scope="scope">
               <pre>{{ showSourceBook(scope.row) }}</pre>
@@ -845,7 +855,7 @@
           <el-table-column
             label="操作"
             width="100px"
-            v-if="!isShowFailureBookSource"
+            v-if="!isShowFailureBookSource && isAdmin"
           >
             <template slot-scope="scope">
               <el-button type="text" @click="editBookSource(scope.row)"
@@ -868,11 +878,20 @@
       </div>
       <div slot="footer" class="dialog-footer">
         <el-button
+          v-if="isAdmin && !isShowFailureBookSource"
           type="primary"
           class="float-left"
           size="medium"
           @click="deleteBookSourceList"
           >批量删除</el-button
+        >
+        <el-button
+          v-if="isAdmin && !isShowFailureBookSource"
+          type="primary"
+          class="float-left"
+          size="medium"
+          @click="showGrantDialog"
+          >批量授权</el-button
         >
         <span class="check-tip"
           >已选择 {{ manageSourceSelection.length }} 个</span
@@ -888,6 +907,51 @@
         >
         <el-button @click="showBookSourceManageDialog = false" size="medium"
           >取消</el-button
+        >
+      </div>
+    </el-dialog>
+
+    <el-dialog
+      title="书源授权"
+      :visible.sync="showBookSourceGrantDialog"
+      :width="dialogSmallWidth"
+      :top="dialogTop"
+      :fullscreen="collapseMenu"
+      :class="isWebApp && !isNight ? 'status-bar-light-bg-dialog' : ''"
+      v-if="$store.getters.isNormalPage"
+    >
+      <div class="source-container">
+        <div class="check-form">
+          <span class="check-form-label">授权给：</span>
+          <el-select
+            v-model="grantUserList"
+            multiple
+            filterable
+            clearable
+            collapse-tags
+            size="medium"
+            class="grant-user-select"
+            placeholder="选择用户（可多选、可搜索）"
+          >
+            <el-option
+              v-for="(item, index) in userOptions"
+              :key="'grant-user-' + index"
+              :label="item.username"
+              :value="item.username"
+            ></el-option>
+          </el-select>
+        </div>
+        <div class="grant-tip">
+          已选择 {{ manageSourceSelection.length }}
+          个书源；清空保存表示收回授权（该书源仅管理员可见）。
+        </div>
+      </div>
+      <div slot="footer" class="dialog-footer">
+        <el-button size="medium" @click="showBookSourceGrantDialog = false"
+          >取 消</el-button
+        >
+        <el-button size="medium" type="primary" @click="saveBookSourceGrants"
+          >保 存</el-button
         >
       </div>
     </el-dialog>
@@ -1066,6 +1130,11 @@ export default {
       checkBookSourceTip: "",
       isCheckingBookSource: false,
 
+      // 书源授权
+      showBookSourceGrantDialog: false,
+      grantUserList: [],
+      userOptions: [],
+
       showNavigation: false,
 
       navigationClass: "",
@@ -1167,6 +1236,12 @@ export default {
     importUsedTxtRule(val) {
       if (val) {
         this.importBookInfo.tocUrl = val;
+      }
+    },
+    // 打开书源管理时预加载用户列表，供授权控件使用
+    showBookSourceManageDialog(val) {
+      if (val && this.isAdmin && !this.userOptions.length) {
+        this.loadUserOptions();
       }
     },
     importBookGroup(val) {
@@ -1885,6 +1960,10 @@ export default {
         this.$message.error("后端未连接");
         return;
       }
+      if (!this.isImportRssSource && !this.isAdmin) {
+        this.$message.error("无权限操作：仅管理员可导入书源");
+        return;
+      }
       if (!this.checkedSourceIndex.length) {
         this.$message.error("请选择需要导入的源");
         return;
@@ -1996,6 +2075,10 @@ export default {
       });
     },
     async deleteBookSourceList() {
+      if (!this.isAdmin) {
+        this.$message.error("无权限操作：仅管理员可删除书源");
+        return;
+      }
       if (!this.manageSourceSelection.length) {
         this.$message.error("请选择需要删除的源");
         return;
@@ -2497,6 +2580,10 @@ export default {
       );
     },
     async deleteAllBookSource() {
+      if (!this.isAdmin) {
+        this.$message.error("无权限操作：仅管理员可清空书源");
+        return;
+      }
       const res = await this.$confirm(`确认要清空所有书源吗?`, "提示", {
         confirmButtonText: "确定",
         cancelButtonText: "取消",
@@ -2521,6 +2608,10 @@ export default {
       );
     },
     async deleteBookSourceFile() {
+      if (!this.isAdmin) {
+        this.$message.error("无权限操作：仅管理员可恢复默认书源");
+        return;
+      }
       const res = await this.$confirm(`确认要恢复默认书源吗?`, "提示", {
         confirmButtonText: "确定",
         cancelButtonText: "取消",
@@ -2544,13 +2635,88 @@ export default {
         }
       );
     },
-    editBookSource(bookSource) {
+    // 加载用户列表，供书源授权选择（仅管理员有权限，其他情况静默失败）
+    loadUserOptions() {
+      if (!this.$store.state.connected) {
+        return Promise.resolve();
+      }
+      return Axios.get(this.api + "/getUserList", { silent: true }).then(
+        res => {
+          if (res.data.isSuccess) {
+            this.userOptions = (res.data.data || []).filter(
+              v => v.username && v.username !== "default"
+            );
+          }
+        },
+        () => {
+          //
+        }
+      );
+    },
+    showShareUsers(bookSource) {
+      const users = bookSource.shareUsers || [];
+      if (!users.length) {
+        return "仅管理员";
+      }
+      return users.join("、");
+    },
+    showGrantDialog() {
+      if (!this.isAdmin) {
+        this.$message.error("无权限操作：仅管理员可设置书源授权");
+        return;
+      }
+      if (!this.manageSourceSelection.length) {
+        this.$message.error("请选择需要授权的书源");
+        return;
+      }
+      this.loadUserOptions();
+      this.grantUserList = [];
+      this.showBookSourceGrantDialog = true;
+    },
+    saveBookSourceGrants() {
+      const bookSourceUrls = this.manageSourceSelection
+        .map(v => v.bookSourceUrl)
+        .filter(v => !!v);
+      if (!bookSourceUrls.length) {
+        this.$message.error("请选择需要授权的书源");
+        return;
+      }
+      Axios.post(this.api + "/saveBookSourceGrants", {
+        bookSourceUrls,
+        usernames: this.grantUserList,
+        replace: true
+      }).then(
+        res => {
+          if (res.data.isSuccess) {
+            this.showBookSourceGrantDialog = false;
+            this.$message.success("授权已保存");
+            this.loadBookSource(true);
+          }
+        },
+        error => {
+          this.$message.error("保存授权失败 " + (error && error.toString()));
+        }
+      );
+    },
+    async editBookSource(bookSource) {
+      if (!this.isAdmin) {
+        this.$message.error("无权限操作：仅管理员可新增或修改书源");
+        return;
+      }
+      // 管理员编辑书源时加载用户列表，用于授权选择
+      await this.loadUserOptions();
       const editHandler = data => {
+        const sourceData = Object.assign({}, data);
+        const shareUsers = Array.isArray(sourceData.shareUsers)
+          ? sourceData.shareUsers.slice()
+          : [];
+        // 授权用户不写入书源 JSON，由控件单独提交
+        delete sourceData.shareUsers;
         eventBus.$emit(
           "showEditor",
           "编辑书源",
-          JSON.stringify(data, null, 4),
-          (content, close) => {
+          JSON.stringify(sourceData, null, 4),
+          (content, close, selectedUsers) => {
             try {
               const source = JSON.parse(content);
               if (!source.bookSourceName) {
@@ -2561,6 +2727,10 @@ export default {
                 this.$message.error("书源链接不能为空");
                 return;
               }
+              // 授权用户随书源一起提交（后端单独存授权表）
+              source.shareUsers = Array.isArray(selectedUsers)
+                ? selectedUsers
+                : shareUsers;
               Axios.post(this.api + "/saveBookSource", source).then(
                 res => {
                   if (res.data.isSuccess) {
@@ -2579,6 +2749,10 @@ export default {
             } catch (e) {
               this.$message.error("书源必须是JSON格式");
             }
+          },
+          {
+            shareUsers,
+            users: this.userOptions
           }
         );
       };
@@ -2852,6 +3026,14 @@ export default {
     },
     loginAuth() {
       return this.$store.state.loginAuth;
+    },
+    // 是否具备书源管理权限：未开启鉴权 / admin 角色 / 管理模式（管理密码）
+    isAdmin() {
+      const userInfo = this.$store.state.userInfo || {};
+      if (!this.$store.state.isSecureMode) {
+        return true;
+      }
+      return userInfo.role === "admin" || !!this.$store.state.isManagerMode;
     },
     bookSourceList() {
       return this.$store.state.bookSourceList;
