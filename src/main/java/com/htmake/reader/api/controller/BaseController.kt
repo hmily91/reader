@@ -327,18 +327,7 @@ open class BaseController(override val coroutineContext: CoroutineContext): Coro
         if (grantJson != null) {
             grantJson.forEach {
                 var url = it.key
-                var userList = mutableListOf<String>()
-                var value = it.value
-                if (value is JsonArray) {
-                    for (i in 0 until value.size()) {
-                        var username = value.getString(i)
-                        if (!username.isNullOrEmpty()) {
-                            userList.add(username)
-                        }
-                    }
-                } else if (value is String && value.isNotEmpty()) {
-                    userList.add(value)
-                }
+                var userList = parseUserList(it.value)
                 if (url.isNotEmpty()) {
                     grantMap.put(url, userList)
                 }
@@ -347,21 +336,58 @@ open class BaseController(override val coroutineContext: CoroutineContext): Coro
         return grantMap
     }
 
-    /** 保存书源授权表 */
-    fun saveBookSourceGrantMap(grantMap: Map<String, List<String>>) {
-        var grantJson = JsonObject()
-        grantMap.forEach {
-            if (it.key.isNotEmpty()) {
-                var userArray = JsonArray()
-                for (name in it.value) {
-                    if (name.isNotEmpty()) {
-                        userArray.add(name)
+    /** 把授权表里的值（可能是数组、{"list":[...]}、字符串）统一解析成用户名列表 */
+    fun parseUserList(value: Any?): MutableList<String> {
+        var userList = mutableListOf<String>()
+        when (value) {
+            is JsonArray -> {
+                for (i in 0 until value.size()) {
+                    var username = value.getString(i)
+                    if (!username.isNullOrEmpty()) {
+                        userList.add(username)
                     }
                 }
-                grantJson.put(it.key, userArray)
+            }
+            is JsonObject -> {
+                var inner = value.getJsonArray("list")
+                if (inner != null) {
+                    for (i in 0 until inner.size()) {
+                        var username = inner.getString(i)
+                        if (!username.isNullOrEmpty()) {
+                            userList.add(username)
+                        }
+                    }
+                }
+            }
+            is Iterable<*> -> {
+                value.forEach {
+                    var username = it?.toString() ?: ""
+                    if (username.isNotEmpty()) {
+                        userList.add(username)
+                    }
+                }
+            }
+            is String -> {
+                if (value.isNotEmpty()) {
+                    userList.add(value)
+                }
             }
         }
-        saveStorage("data", "bookSourceGrants", value = grantJson.map)
+        return userList
+    }
+
+    /** 保存书源授权表
+     * 注意：这里必须存「纯 Kotlin 集合」而不是 JsonArray —— saveStorage 用 gson 序列化，
+     * JsonArray 会被 gson 当成普通 bean 写成 {"list":[...]}，再读回来就不是数组了。
+     */
+    fun saveBookSourceGrantMap(grantMap: Map<String, List<String>>) {
+        var plainMap = mutableMapOf<String, List<String>>()
+        grantMap.forEach {
+            if (it.key.isNotEmpty()) {
+                plainMap.put(it.key, it.value.filter { name -> name.isNotEmpty() })
+            }
+        }
+        saveStorage("data", "bookSourceGrants", value = plainMap)
     }
 
     /** 系统书源（管理员维护的唯一数据源），位于 storage/data/default/bookSource.json */
@@ -384,6 +410,30 @@ open class BaseController(override val coroutineContext: CoroutineContext): Coro
             }
         }
         return userArray
+    }
+
+    /** 把 Vert.x 的 JsonObject/JsonArray 递归转成普通 Map/List。
+     * Jackson 直接序列化 JsonObject 会输出 {"map":...}、JsonArray 会输出 {"list":...}，
+     * 返回给前端/客户端前必须先转成纯集合类型。
+     */
+    fun toPlainValue(value: Any?): Any? {
+        return when (value) {
+            is JsonObject -> {
+                var map = linkedMapOf<String, Any?>()
+                value.forEach {
+                    map.put(it.key, toPlainValue(it.value))
+                }
+                map
+            }
+            is JsonArray -> {
+                var list = arrayListOf<Any?>()
+                for (i in 0 until value.size()) {
+                    list.add(toPlainValue(value.getValue(i)))
+                }
+                list
+            }
+            else -> value
+        }
     }
 
     /** 按授权关系过滤出指定用户可见的书源 */
