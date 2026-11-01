@@ -77,17 +77,89 @@ class BookSourceController(coroutineContext: CoroutineContext): BaseController(c
         webClient = SpringContextUtils.getBean("webClient", WebClient::class.java)
     }
 
+    /**
+     * 获取当前用户可见的书源列表
+     * 书源统一由管理员维护在系统空间（default），普通用户按授权关系过滤，
+     * 不再为每个用户拷贝一份副本（否则授权形同虚设）。
+     */
     suspend fun getUserBookSourceJson(userNameSpace: String): JsonArray? {
-        var bookSourceList: JsonArray? = asJsonArray(getUserStorage(userNameSpace, "bookSource"))
-        if (bookSourceList == null && !userNameSpace.equals("default")) {
-            // 用户书源文件不存在，拷贝系统书源
-            var systemBookSourceList: JsonArray? = asJsonArray(getUserStorage("default", "bookSource"))
-            if (systemBookSourceList != null) {
-                saveUserStorage(userNameSpace, "bookSource", systemBookSourceList.getList())
-                bookSourceList = systemBookSourceList
+        var systemBookSourceList = getSystemBookSourceJson()
+        if (systemBookSourceList.size() <= 0) {
+            return null
+        }
+        return filterVisibleBookSource(systemBookSourceList, userNameSpace)
+    }
+
+    /** 在书源数组中查找指定书源的下标 */
+    fun findBookSourceIndex(bookSourceList: JsonArray, bookSourceUrl: String): Int {
+        for (i in 0 until bookSourceList.size()) {
+            var _bookSource = bookSourceList.getJsonObject(i)
+            var url = _bookSource.getString("bookSourceUrl") ?: ""
+            if (url.equals(bookSourceUrl)) {
+                return i
             }
         }
-        return bookSourceList
+        return -1
+    }
+
+    /** 从请求体中读取管理员提交的授权用户列表（shareUsers），不存在时返回 null 表示不变更授权 */
+    fun getShareUsersFromBody(context: RoutingContext): MutableList<String>? {
+        var body: JsonObject? = null
+        try {
+            body = context.bodyAsJson
+        } catch (e: Exception) {
+            return null
+        }
+        if (body == null) {
+            return null
+        }
+        var shareUsers = body.getJsonArray("shareUsers")
+        if (shareUsers == null) {
+            return null
+        }
+        var list = mutableListOf<String>()
+        for (i in 0 until shareUsers.size()) {
+            var username = shareUsers.getString(i)
+            if (!username.isNullOrEmpty() && !list.contains(username)) {
+                list.add(username)
+            }
+        }
+        return list
+    }
+
+    /** 保存单个书源的授权用户 */
+    fun saveBookSourceGrant(bookSourceUrl: String, shareUsers: List<String>?) {
+        if (bookSourceUrl.isEmpty() || shareUsers == null) {
+            return
+        }
+        var grantMap = getBookSourceGrantMap()
+        grantMap.put(bookSourceUrl, shareUsers.toMutableList())
+        saveBookSourceGrantMap(grantMap)
+    }
+
+    /** 删除书源时同步清理授权记录 */
+    fun removeBookSourceGrant(bookSourceUrl: String) {
+        if (bookSourceUrl.isEmpty()) {
+            return
+        }
+        var grantMap = getBookSourceGrantMap()
+        if (grantMap.containsKey(bookSourceUrl)) {
+            grantMap.remove(bookSourceUrl)
+            saveBookSourceGrantMap(grantMap)
+        }
+    }
+
+    /** 管理员查看书源时附加授权用户列表，便于前端展示与回显 */
+    fun appendShareUsers(bookSourceList: JsonArray): JsonArray {
+        var grantMap = getBookSourceGrantMap()
+        var result = JsonArray()
+        for (i in 0 until bookSourceList.size()) {
+            var bookSourceObject = bookSourceList.getJsonObject(i).copy()
+            var bookSourceUrl = bookSourceObject.getString("bookSourceUrl") ?: ""
+            bookSourceObject.put("shareUsers", toUserJsonArray(grantMap.get(bookSourceUrl)))
+            result.add(bookSourceObject)
+        }
+        return result
     }
 
     suspend fun saveBookSource(context: RoutingContext): ReturnData {
@@ -95,26 +167,24 @@ class BookSourceController(coroutineContext: CoroutineContext): BaseController(c
         if (!checkAuth(context)) {
             return returnData.setData("NEED_LOGIN").setErrorMsg("请登录后使用")
         }
+        if (!isAdmin(context)) {
+            return returnData.setData("NEED_ADMIN").setErrorMsg("无权限操作：仅管理员可新增或修改书源")
+        }
         val bookSource = BookSource.fromJson(context.bodyAsString).getOrNull()
         if (bookSource == null) {
             return returnData.setErrorMsg("参数错误")
         }
+        if (bookSource.bookSourceUrl.isNullOrEmpty()) {
+            return returnData.setErrorMsg("书源链接不能为空")
+        }
+        if (bookSource.bookSourceName.isNullOrEmpty()) {
+            return returnData.setErrorMsg("书源名称不能为空")
+        }
         // val bookSource = context.bodyAsJson.mapTo(BookSource::class.java)
 
-        var userNameSpace = getUserNameSpace(context)
-        var bookSourceList = getUserBookSourceJson(userNameSpace)
-        if (bookSourceList == null) {
-            bookSourceList = JsonArray()
-        }
-        // 遍历判断书本是否存在
-        var existIndex: Int = -1
-        for (i in 0 until bookSourceList.size()) {
-            var _bookSource = bookSourceList.getJsonObject(i).mapTo(BookSource::class.java)
-            if (_bookSource.bookSourceUrl.equals(bookSource.bookSourceUrl)) {
-                existIndex = i
-                break;
-            }
-        }
+        // 书源统一保存在系统空间，由管理员维护
+        var bookSourceList = getSystemBookSourceJson()
+        var existIndex: Int = findBookSourceIndex(bookSourceList, bookSource.bookSourceUrl)
         if (existIndex >= 0) {
             var sourceList = bookSourceList.getList()
             sourceList.set(existIndex, JsonObject.mapFrom(bookSource))
@@ -124,7 +194,13 @@ class BookSourceController(coroutineContext: CoroutineContext): BaseController(c
         }
 
         // logger.info("bookSourceList: {}", bookSourceList)
-        saveUserStorage(userNameSpace, "bookSource", bookSourceList)
+        saveUserStorage("default", "bookSource", bookSourceList)
+
+        // 保存管理员设置的授权用户
+        var shareUsers = getShareUsersFromBody(context)
+        if (shareUsers != null) {
+            saveBookSourceGrant(bookSource.bookSourceUrl, shareUsers)
+        }
         return returnData.setData("")
     }
 
@@ -133,30 +209,36 @@ class BookSourceController(coroutineContext: CoroutineContext): BaseController(c
         if (!checkAuth(context)) {
             return returnData.setData("NEED_LOGIN").setErrorMsg("请登录后使用")
         }
-        val bookSourceJsonArray = context.bodyAsJsonArray
+        if (!isAdmin(context)) {
+            return returnData.setData("NEED_ADMIN").setErrorMsg("无权限操作：仅管理员可导入书源")
+        }
+        var body = context.bodyAsJson
+        var bookSourceJsonArray: JsonArray? = context.bodyAsJsonArray
+        if (bookSourceJsonArray == null && body != null) {
+            // 兼容 { sources: [...], shareUsers: [...] } 形式
+            bookSourceJsonArray = body.getJsonArray("sources")
+        }
         if (bookSourceJsonArray == null) {
             return returnData.setErrorMsg("参数错误")
         }
-        var userNameSpace = getUserNameSpace(context)
-        var bookSourceList = getUserBookSourceJson(userNameSpace)
-        if (bookSourceList == null) {
-            bookSourceList = JsonArray()
-        }
+        var shareUsers = getShareUsersFromBody(context)
+
+        // 书源统一保存在系统空间，由管理员维护
+        var bookSourceList = getSystemBookSourceJson()
         for (k in 0 until bookSourceJsonArray.size()) {
-            val bookSource = BookSource.fromJson(bookSourceJsonArray.getJsonObject(k).toString()).getOrNull()
+            var bookSourceObject = bookSourceJsonArray.getJsonObject(k)
+            if (bookSourceObject == null) {
+                continue
+            }
+            val bookSource = BookSource.fromJson(bookSourceObject.toString()).getOrNull()
             if (bookSource == null) {
                 continue
             }
-            // var bookSource = bookSourceJsonArray.getJsonObject(k).mapTo(BookSource::class.java)
-            // 遍历判断书本是否存在
-            var existIndex: Int = -1
-            for (i in 0 until bookSourceList!!.size()) {
-                var _bookSource = bookSourceList.getJsonObject(i).mapTo(BookSource::class.java)
-                if (_bookSource.bookSourceUrl.equals(bookSource.bookSourceUrl)) {
-                    existIndex = i
-                    break;
-                }
+            if (bookSource.bookSourceUrl.isNullOrEmpty()) {
+                continue
             }
+            // 遍历判断书源是否存在
+            var existIndex: Int = findBookSourceIndex(bookSourceList, bookSource.bookSourceUrl)
             if (existIndex >= 0) {
                 var sourceList = bookSourceList.getList()
                 sourceList.set(existIndex, JsonObject.mapFrom(bookSource))
@@ -164,10 +246,14 @@ class BookSourceController(coroutineContext: CoroutineContext): BaseController(c
             } else {
                 bookSourceList.add(JsonObject.mapFrom(bookSource))
             }
+            // 导入时若指定了授权用户，则一并授权
+            if (shareUsers != null) {
+                saveBookSourceGrant(bookSource.bookSourceUrl, shareUsers)
+            }
         }
 
         // logger.info("bookSourceList: {}", bookSourceList)
-        saveUserStorage(userNameSpace, "bookSource", bookSourceList!!)
+        saveUserStorage("default", "bookSource", bookSourceList)
         return returnData.setData("")
     }
 
@@ -192,19 +278,19 @@ class BookSourceController(coroutineContext: CoroutineContext): BaseController(c
             bookSourceList = JsonArray()
         }
         // 遍历判断书本是否存在
-        var existIndex: Int = -1
-        for (i in 0 until bookSourceList.size()) {
-            var _bookSource = bookSourceList.getJsonObject(i).mapTo(BookSource::class.java)
-            if (_bookSource.bookSourceUrl.equals(bookSourceUrl)) {
-                existIndex = i
-                break;
-            }
-        }
+        var existIndex: Int = findBookSourceIndex(bookSourceList, bookSourceUrl)
         if (existIndex < 0) {
-            return returnData.setErrorMsg("书源信息不存在")
+            return returnData.setErrorMsg("书源信息不存在，或未被授权访问")
         }
 
-        return returnData.setData(bookSourceList.getJsonObject(existIndex).map)
+        var bookSourceObject = bookSourceList.getJsonObject(existIndex)
+        if (isAdmin(context)) {
+            // 管理员额外返回已授权的用户列表，便于前端回显
+            var grantMap = getBookSourceGrantMap()
+            bookSourceObject = bookSourceObject.copy()
+            bookSourceObject.put("shareUsers", toUserJsonArray(grantMap.get(bookSourceUrl)))
+        }
+        return returnData.setData(bookSourceObject.map)
     }
 
     suspend fun getBookSources(context: RoutingContext): ReturnData {
@@ -221,20 +307,24 @@ class BookSourceController(coroutineContext: CoroutineContext): BaseController(c
         var userNameSpace = getUserNameSpace(context)
         var bookSourceList = getUserBookSourceJson(userNameSpace)
         if (bookSourceList != null) {
+            // 管理员返回全量并附加授权用户，普通用户只返回已授权的书源
+            var isAdminUser = isAdmin(context)
+            var list = if (isAdminUser) appendShareUsers(bookSourceList) else bookSourceList
             if (simple > 0) {
-                var list = arrayListOf<Map<String, Any?>>()
-                for (i in 0 until bookSourceList.size()) {
-                    var bookSource = bookSourceList.getJsonObject(i).mapTo(BookSource::class.java)
-                    list.add(mapOf<String, Any?>(
-                        "bookSourceGroup" to bookSource.bookSourceGroup,
-                        "bookSourceName" to bookSource.bookSourceName,
-                        "bookSourceUrl" to bookSource.bookSourceUrl,
-                        "exploreUrl" to bookSource.exploreUrl
+                var simpleList = arrayListOf<Map<String, Any?>>()
+                for (i in 0 until list.size()) {
+                    var bookSourceObject = list.getJsonObject(i)
+                    simpleList.add(mapOf<String, Any?>(
+                        "bookSourceGroup" to bookSourceObject.getString("bookSourceGroup"),
+                        "bookSourceName" to bookSourceObject.getString("bookSourceName"),
+                        "bookSourceUrl" to bookSourceObject.getString("bookSourceUrl"),
+                        "exploreUrl" to bookSourceObject.getString("exploreUrl"),
+                        "shareUsers" to (bookSourceObject.getValue("shareUsers") ?: listOf<String>())
                     ))
                 }
-                return returnData.setData(list)
+                return returnData.setData(simpleList)
             }
-            return returnData.setData(bookSourceList.getList())
+            return returnData.setData(list.getList())
         }
         return returnData.setData(arrayListOf<Int>())
     }
@@ -244,28 +334,27 @@ class BookSourceController(coroutineContext: CoroutineContext): BaseController(c
         if (!checkAuth(context)) {
             return returnData.setData("NEED_LOGIN").setErrorMsg("请登录后使用")
         }
-        val bookSource = context.bodyAsJson.mapTo(BookSource::class.java)
+        if (!isAdmin(context)) {
+            return returnData.setData("NEED_ADMIN").setErrorMsg("无权限操作：仅管理员可删除书源")
+        }
+        var body = context.bodyAsJson
+        if (body == null) {
+            return returnData.setErrorMsg("参数错误")
+        }
+        var bookSourceUrl = body.getString("bookSourceUrl") ?: ""
 
-        var userNameSpace = getUserNameSpace(context)
-        var bookSourceList = getUserBookSourceJson(userNameSpace)
-        if (bookSourceList == null) {
-            bookSourceList = JsonArray()
-        }
-        // 遍历判断书本是否存在
-        var existIndex: Int = -1
-        for (i in 0 until bookSourceList.size()) {
-            var _bookSource = bookSourceList.getJsonObject(i).mapTo(BookSource::class.java)
-            if (_bookSource.bookSourceUrl.equals(bookSource.bookSourceUrl)) {
-                existIndex = i
-                break;
-            }
-        }
+        var bookSourceList = getSystemBookSourceJson()
+        // 遍历判断书源是否存在
+        var existIndex: Int = findBookSourceIndex(bookSourceList, bookSourceUrl)
         if (existIndex >= 0) {
+            var removed = bookSourceList.getJsonObject(existIndex)
             bookSourceList.remove(existIndex)
+            var removedUrl = removed.getString("bookSourceUrl") ?: ""
+            removeBookSourceGrant(removedUrl)
         }
 
         // logger.info("bookSourceList: {}", bookSourceList)
-        saveUserStorage(userNameSpace, "bookSource", bookSourceList)
+        saveUserStorage("default", "bookSource", bookSourceList)
         return returnData.setData("")
     }
 
@@ -274,31 +363,34 @@ class BookSourceController(coroutineContext: CoroutineContext): BaseController(c
         if (!checkAuth(context)) {
             return returnData.setData("NEED_LOGIN").setErrorMsg("请登录后使用")
         }
-        val bookSourceJsonArray = context.bodyAsJsonArray
-
-        var userNameSpace = getUserNameSpace(context)
-        var bookSourceList = getUserBookSourceJson(userNameSpace)
-        if (bookSourceList == null) {
-            bookSourceList = JsonArray()
+        if (!isAdmin(context)) {
+            return returnData.setData("NEED_ADMIN").setErrorMsg("无权限操作：仅管理员可删除书源")
         }
+        val bookSourceJsonArray = context.bodyAsJsonArray
+        if (bookSourceJsonArray == null) {
+            return returnData.setErrorMsg("参数错误")
+        }
+
+        var bookSourceList = getSystemBookSourceJson()
         for (k in 0 until bookSourceJsonArray.size()) {
-            var bookSource = bookSourceJsonArray.getJsonObject(k).mapTo(BookSource::class.java)
-            // 遍历判断书本是否存在
-            var existIndex: Int = -1
-            for (i in 0 until bookSourceList.size()) {
-                var _bookSource = bookSourceList.getJsonObject(i).mapTo(BookSource::class.java)
-                if (_bookSource.bookSourceUrl.equals(bookSource.bookSourceUrl)) {
-                    existIndex = i
-                    break;
-                }
+            var bookSourceObject = bookSourceJsonArray.getJsonObject(k)
+            if (bookSourceObject == null) {
+                continue
             }
+            var bookSourceUrl = bookSourceObject.getString("bookSourceUrl") ?: ""
+            if (bookSourceUrl.isEmpty()) {
+                continue
+            }
+            // 遍历判断书源是否存在
+            var existIndex: Int = findBookSourceIndex(bookSourceList, bookSourceUrl)
             if (existIndex >= 0) {
                 bookSourceList.remove(existIndex)
+                removeBookSourceGrant(bookSourceUrl)
             }
         }
 
         // logger.info("bookSourceList: {}", bookSourceList)
-        saveUserStorage(userNameSpace, "bookSource", bookSourceList)
+        saveUserStorage("default", "bookSource", bookSourceList)
         return returnData.setData("")
     }
 
@@ -307,8 +399,12 @@ class BookSourceController(coroutineContext: CoroutineContext): BaseController(c
         if (!checkAuth(context)) {
             return returnData.setData("NEED_LOGIN").setErrorMsg("请登录后使用")
         }
-        var userNameSpace = getUserNameSpace(context)
-        saveUserStorage(userNameSpace, "bookSource", JsonArray())
+        if (!isAdmin(context)) {
+            return returnData.setData("NEED_ADMIN").setErrorMsg("无权限操作：仅管理员可清空书源")
+        }
+        saveUserStorage("default", "bookSource", JsonArray())
+        // 同步清空授权关系
+        saveBookSourceGrantMap(mapOf<String, List<String>>())
         return returnData.setData("")
     }
 
@@ -317,18 +413,30 @@ class BookSourceController(coroutineContext: CoroutineContext): BaseController(c
         if (!checkAuth(context)) {
             return returnData.setData("NEED_LOGIN").setErrorMsg("请登录后使用")
         }
-        if (!checkManagerAuth(context)) {
-            return returnData.setData("NEED_SECURE_KEY").setErrorMsg("请输入管理密码")
+        if (!isAdmin(context)) {
+            return returnData.setData("NEED_ADMIN").setErrorMsg("无权限操作：仅管理员可设置书源授权")
         }
-        var username = context.bodyAsJson.getString("username")
-        var bookSourceList: JsonArray? = asJsonArray(getUserStorage(username, "bookSource"))
-        if (bookSourceList == null) {
-            return returnData.setErrorMsg("用户书源不存在")
+        var username = context.bodyAsJson.getString("username") ?: ""
+        if (username.isEmpty()) {
+            return returnData.setErrorMsg("参数错误")
         }
 
-        // 保存为默认书源
-        saveUserStorage("default", "bookSource", bookSourceList.getList())
-        return returnData.setData("设置默认书源成功")
+        // 书源统一维护在系统空间，这里把全部书源授权给指定用户
+        var bookSourceList = getSystemBookSourceJson()
+        var grantMap = getBookSourceGrantMap()
+        for (i in 0 until bookSourceList.size()) {
+            var bookSourceUrl = bookSourceList.getJsonObject(i).getString("bookSourceUrl") ?: ""
+            if (bookSourceUrl.isEmpty()) {
+                continue
+            }
+            var userList = grantMap.get(bookSourceUrl) ?: mutableListOf<String>()
+            if (!userList.contains(username)) {
+                userList.add(username)
+            }
+            grantMap.put(bookSourceUrl, userList)
+        }
+        saveBookSourceGrantMap(grantMap)
+        return returnData.setData("已将全部书源授权给用户 " + username)
     }
 
     suspend fun readSourceFile(context: RoutingContext): ReturnData {
@@ -380,18 +488,30 @@ class BookSourceController(coroutineContext: CoroutineContext): BaseController(c
         if (!checkAuth(context)) {
             return returnData.setData("NEED_LOGIN").setErrorMsg("请登录后使用")
         }
-        if (!checkManagerAuth(context)) {
-            return returnData.setData("NEED_SECURE_KEY").setErrorMsg("请输入管理密码")
+        if (!isAdmin(context)) {
+            return returnData.setData("NEED_ADMIN").setErrorMsg("无权限操作：仅管理员可删除用户书源")
         }
         val userJsonArray = context.bodyAsJsonArray
+        if (userJsonArray == null) {
+            return returnData.setErrorMsg("参数错误")
+        }
+        var userSet = mutableSetOf<String>()
         for (i in 0 until userJsonArray.size()) {
             var username = userJsonArray.getString(i)
-            var userBookSourceFile = File(getWorkDir("storage", "data", username, "bookSource.json"))
-            // 删除用户书源文件，恢复默认书源
-            if (userBookSourceFile.exists()) {
-                userBookSourceFile.deleteRecursively()
+            if (!username.isNullOrEmpty()) {
+                userSet.add(username)
             }
         }
+        if (userSet.isEmpty()) {
+            return returnData.setErrorMsg("请选择需要删除书源的用户")
+        }
+        // 清除这些用户的书源授权
+        var grantMap = getBookSourceGrantMap()
+        grantMap.forEach {
+            var userList = it.value
+            userList.removeAll { name -> userSet.contains(name) }
+        }
+        saveBookSourceGrantMap(grantMap)
         return returnData.setData("删除书源成功")
     }
 
@@ -400,12 +520,71 @@ class BookSourceController(coroutineContext: CoroutineContext): BaseController(c
         if (!checkAuth(context)) {
             return returnData.setData("NEED_LOGIN").setErrorMsg("请登录后使用")
         }
-        var userNameSpace = getUserNameSpace(context)
-        var userBookSourceFile = File(getWorkDir("storage", "data", userNameSpace, "bookSource.json"))
-        // 删除用户书源文件，恢复默认书源
-        if (userBookSourceFile.exists()) {
-            userBookSourceFile.deleteRecursively()
+        if (!isAdmin(context)) {
+            return returnData.setData("NEED_ADMIN").setErrorMsg("无权限操作：仅管理员可恢复默认书源")
         }
+        // 清除当前用户（或管理模式指定用户）的书源授权，恢复为"仅管理员可见"
+        var userNameSpace = getUserNameSpace(context)
+        var grantMap = getBookSourceGrantMap()
+        grantMap.forEach {
+            var userList = it.value
+            userList.removeAll { name -> name.equals(userNameSpace) }
+        }
+        saveBookSourceGrantMap(grantMap)
         return returnData.setData("")
+    }
+
+    /**
+     * 批量设置书源授权用户（仅管理员）
+     * 入参：{ "bookSourceUrls": ["..."], "usernames": ["..."], "replace": true }
+     * replace=true 表示覆盖原有授权，false 表示追加
+     */
+    suspend fun saveBookSourceGrants(context: RoutingContext): ReturnData {
+        val returnData = ReturnData()
+        if (!checkAuth(context)) {
+            return returnData.setData("NEED_LOGIN").setErrorMsg("请登录后使用")
+        }
+        if (!isAdmin(context)) {
+            return returnData.setData("NEED_ADMIN").setErrorMsg("无权限操作：仅管理员可设置书源授权")
+        }
+        var body = context.bodyAsJson
+        if (body == null) {
+            return returnData.setErrorMsg("参数错误")
+        }
+        var bookSourceUrls = body.getJsonArray("bookSourceUrls")
+        var usernames = body.getJsonArray("usernames")
+        if (bookSourceUrls == null || usernames == null) {
+            return returnData.setErrorMsg("参数错误")
+        }
+        var replace = body.getValue("replace") as? Boolean ?: false
+
+        var userList = mutableListOf<String>()
+        for (i in 0 until usernames.size()) {
+            var username = usernames.getString(i)
+            if (!username.isNullOrEmpty() && !userList.contains(username)) {
+                userList.add(username)
+            }
+        }
+
+        var grantMap = getBookSourceGrantMap()
+        for (i in 0 until bookSourceUrls.size()) {
+            var bookSourceUrl = bookSourceUrls.getString(i) ?: ""
+            if (bookSourceUrl.isEmpty()) {
+                continue
+            }
+            if (replace) {
+                grantMap.put(bookSourceUrl, userList.toMutableList())
+            } else {
+                var existedUsers = grantMap.get(bookSourceUrl) ?: mutableListOf<String>()
+                for (name in userList) {
+                    if (!existedUsers.contains(name)) {
+                        existedUsers.add(name)
+                    }
+                }
+                grantMap.put(bookSourceUrl, existedUsers)
+            }
+        }
+        saveBookSourceGrantMap(grantMap)
+        return returnData.setData("书源授权已保存")
     }
 }
