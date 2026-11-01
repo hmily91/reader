@@ -21,7 +21,7 @@
       <div class="navigation-inner-wrapper">
         <div class="navigation-title">
           阅读
-          <span class="version-text" @click="updateForce">{{
+          <span class="version-text" title="查看更新日志" @click="showUpdateLog">{{
             $store.state.version
           }}</span>
         </div>
@@ -150,6 +150,14 @@
               @click="setIP"
             >
               {{ connectStatus }}
+            </el-tag>
+            <el-tag
+              type="info"
+              :effect="isNight ? 'dark' : 'light'"
+              class="setting-btn"
+              @click="showUpdateLog"
+            >
+              更新日志
             </el-tag>
           </div>
         </div>
@@ -957,6 +965,49 @@
     </el-dialog>
 
     <el-dialog
+      title="更新日志"
+      :visible.sync="showUpdateLogDialog"
+      :width="dialogSmallWidth"
+      :top="dialogTop"
+      :fullscreen="collapseMenu"
+      :class="isWebApp && !isNight ? 'status-bar-light-bg-dialog' : ''"
+      v-if="$store.getters.isNormalPage"
+    >
+      <div class="update-log-container">
+        <div
+          class="update-log-item"
+          v-for="(item, index) in updateLog"
+          :key="'update-log-' + index"
+        >
+          <div class="update-log-head">
+            <span class="update-log-version">v{{ item.version }}</span>
+            <span class="update-log-date">{{ item.date }}</span>
+          </div>
+          <ul class="update-log-list">
+            <li v-for="(line, i) in item.contents" :key="'update-log-line-' + i">
+              {{ line }}
+            </li>
+          </ul>
+        </div>
+        <div class="update-log-empty" v-if="!updateLog.length">
+          暂无更新日志
+        </div>
+      </div>
+      <div slot="footer" class="dialog-footer">
+        <el-button
+          size="medium"
+          class="float-left"
+          title="清除前端缓存并重新拉取页面"
+          @click="updateForce"
+          >刷新缓存</el-button
+        >
+        <el-button size="medium" type="primary" @click="showUpdateLogDialog = false"
+          >关 闭</el-button
+        >
+      </div>
+    </el-dialog>
+
+    <el-dialog
       :title="'导入本地书籍' + importMultiBookTip"
       :visible.sync="showImportBookDialog"
       :width="dialogSmallWidth"
@@ -1091,6 +1142,33 @@ const buildURL = require("axios/lib/helpers/buildURL");
 import { isInContainer } from "element-ui/src/utils/dom";
 import Vue from "vue";
 
+// 后端不可用时兜底展示的更新日志（与 src/main/resources/updateLog.json 保持一致）
+const DEFAULT_UPDATE_LOG = [
+  {
+    version: "2.6.1",
+    date: "2026-11-01",
+    contents: [
+      "新增「更新日志」：点击左上角版本号，或侧边栏「后端设定 → 更新日志」即可查看",
+      "修正前端版本号仍显示 2.5.4 的问题，前端与后端版本统一为 2.6.1",
+      "书源管理弹窗新增「授权用户」列，可直观看到每条书源开放给了谁",
+      "书源编辑弹窗顶部新增「授权用户」多选控件，保存时一并提交"
+    ]
+  },
+  {
+    version: "2.6.0",
+    date: "2026-11-01",
+    contents: [
+      "书源统一由管理员维护在系统空间，普通用户不再各自拷贝书源副本",
+      "新增书源授权表 storage/data/bookSourceGrants.json，按书源链接记录开放给哪些用户",
+      "仅管理员可新增 / 编辑 / 删除 / 导入 / 清空书源，普通用户的写操作前后端双重拦截",
+      "用户新增 role 字段，首个注册的用户自动成为管理员，管理员始终可见全部书源",
+      "默认不对任何普通用户开放，需管理员逐条书源授权后才可见",
+      "搜索、发现、换源、调试等场景均按授权后的书源加载",
+      "启动时自动迁移旧数据：合并各用户书源到系统空间，并按原有归属生成授权表（旧文件改名备份，不删除）"
+    ]
+  }
+];
+
 export default {
   components: {
     Explore,
@@ -1134,6 +1212,9 @@ export default {
       showBookSourceGrantDialog: false,
       grantUserList: [],
       userOptions: [],
+      showUpdateLogDialog: false,
+      updateLog: [],
+      updateLogLoaded: false,
 
       showNavigation: false,
 
@@ -2698,6 +2779,32 @@ export default {
         }
       );
     },
+    // 打开更新日志弹窗，首次打开时向后端拉取
+    showUpdateLog() {
+      this.showUpdateLogDialog = true;
+      if (!this.updateLogLoaded) {
+        this.loadUpdateLog();
+      }
+    },
+    loadUpdateLog() {
+      if (!this.$store.state.connected) {
+        this.updateLog = DEFAULT_UPDATE_LOG;
+        return;
+      }
+      Axios.get(this.api + "/getUpdateLog", { silent: true }).then(
+        res => {
+          const items =
+            res.data.isSuccess && res.data.data && res.data.data.items
+              ? res.data.data.items
+              : null;
+          this.updateLog = items && items.length ? items : DEFAULT_UPDATE_LOG;
+          this.updateLogLoaded = true;
+        },
+        () => {
+          this.updateLog = DEFAULT_UPDATE_LOG;
+        }
+      );
+    },
     async editBookSource(bookSource) {
       if (!this.isAdmin) {
         this.$message.error("无权限操作：仅管理员可新增或修改书源");
@@ -3673,6 +3780,62 @@ export default {
         min-width: 130px;
         margin-right: 10px;
       }
+    }
+  }
+
+  .grant-user-select {
+    flex: 1;
+    min-width: 180px;
+  }
+
+  .grant-tip {
+    font-size: 12px;
+    color: #909399;
+    padding: 8px 2px 0;
+    line-height: 1.6;
+  }
+
+  .update-log-container {
+    max-height: 50vh;
+    overflow-y: auto;
+    padding: 0 10px;
+
+    .update-log-item {
+      margin-bottom: 16px;
+    }
+
+    .update-log-head {
+      display: flex;
+      flex-direction: row;
+      align-items: center;
+      margin-bottom: 4px;
+    }
+
+    .update-log-version {
+      font-size: 16px;
+      font-weight: 600;
+      margin-right: 10px;
+    }
+
+    .update-log-date {
+      font-size: 12px;
+      color: #909399;
+    }
+
+    .update-log-list {
+      margin: 0;
+      padding-left: 20px;
+
+      li {
+        font-size: 14px;
+        line-height: 1.8;
+      }
+    }
+
+    .update-log-empty {
+      text-align: center;
+      color: #909399;
+      padding: 20px 0;
     }
   }
 
