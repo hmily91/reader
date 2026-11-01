@@ -1847,20 +1847,19 @@ class BookController(coroutineContext: CoroutineContext): BaseController(corouti
     }
 
     fun loadBookSourceStringList(userNameSpace: String, bookSourceGroup: String = ""): List<String> {
-        var bookSourceList: JsonArray? = asJsonArray(getUserStorage(userNameSpace, "bookSource"))
+        // 书源统一维护在系统空间（default），普通用户按授权关系过滤
+        var visibleList = filterVisibleBookSource(getSystemBookSourceJson(), userNameSpace)
         var userBookSourceList = arrayListOf<String>()
-        if (bookSourceList != null) {
-            for (i in 0 until bookSourceList.size()) {
-                var isAdd = true
-                if (!bookSourceGroup.isEmpty()) {
-                    val bookSource = bookSourceList.getJsonObject(i).mapTo(BookSource::class.java)
-                    if (!bookSource.bookSourceGroup.equals(bookSourceGroup)) {
-                        isAdd = false
-                    }
+        for (i in 0 until visibleList.size()) {
+            var isAdd = true
+            if (!bookSourceGroup.isEmpty()) {
+                val bookSource = visibleList.getJsonObject(i).mapTo(BookSource::class.java)
+                if (!bookSource.bookSourceGroup.equals(bookSourceGroup)) {
+                    isAdd = false
                 }
-                if (isAdd) {
-                    userBookSourceList.add(bookSourceList.getJsonObject(i).toString())
-                }
+            }
+            if (isAdd) {
+                userBookSourceList.add(visibleList.getJsonObject(i).toString())
             }
         }
         return userBookSourceList
