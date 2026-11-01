@@ -283,14 +283,14 @@ class BookSourceController(coroutineContext: CoroutineContext): BaseController(c
             return returnData.setErrorMsg("书源信息不存在，或未被授权访问")
         }
 
-        var bookSourceObject = bookSourceList.getJsonObject(existIndex)
+        var bookSourceObject = bookSourceList.getJsonObject(existIndex).copy()
         if (isAdmin(context)) {
             // 管理员额外返回已授权的用户列表，便于前端回显
             var grantMap = getBookSourceGrantMap()
-            bookSourceObject = bookSourceObject.copy()
             bookSourceObject.put("shareUsers", toUserJsonArray(grantMap.get(bookSourceUrl)))
         }
-        return returnData.setData(bookSourceObject.map)
+        // 深拷贝成普通 Map，避免 Jackson 把 JsonObject 序列化成 {"map":...}
+        return returnData.setData(toPlainValue(bookSourceObject))
     }
 
     suspend fun getBookSources(context: RoutingContext): ReturnData {
@@ -319,12 +319,14 @@ class BookSourceController(coroutineContext: CoroutineContext): BaseController(c
                         "bookSourceName" to bookSourceObject.getString("bookSourceName"),
                         "bookSourceUrl" to bookSourceObject.getString("bookSourceUrl"),
                         "exploreUrl" to bookSourceObject.getString("exploreUrl"),
-                        "shareUsers" to (bookSourceObject.getValue("shareUsers") ?: listOf<String>())
+                        // 必须是普通字符串列表：直接放 JsonArray 会被 Jackson 序列化成 {"list":[...]}
+                        "shareUsers" to parseUserList(bookSourceObject.getValue("shareUsers"))
                     ))
                 }
                 return returnData.setData(simpleList)
             }
-            return returnData.setData(list.getList())
+            // 深拷贝成普通 List<Map>，避免 Jackson 把 JsonObject 序列化成 {"map":...}
+            return returnData.setData(toPlainValue(list))
         }
         return returnData.setData(arrayListOf<Int>())
     }
