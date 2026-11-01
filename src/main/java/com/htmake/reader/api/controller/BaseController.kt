@@ -436,6 +436,15 @@ open class BaseController(override val coroutineContext: CoroutineContext): Coro
         }
     }
 
+    /** setData 需要非空值，这里对 toPlainValue 的结果兜底 */
+    fun toPlainData(value: Any?): Any {
+        var result = toPlainValue(value)
+        if (result == null) {
+            return mapOf<String, Any?>()
+        }
+        return result
+    }
+
     /** 按授权关系过滤出指定用户可见的书源 */
     fun filterVisibleBookSource(bookSourceList: JsonArray, userNameSpace: String): JsonArray {
         if (!appConfig.secure) {
