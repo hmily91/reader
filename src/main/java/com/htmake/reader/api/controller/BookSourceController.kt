@@ -102,6 +102,27 @@ class BookSourceController(coroutineContext: CoroutineContext): BaseController(c
         return -1
     }
 
+    /** 判断书源是否带有有效规则（用于防止空规则覆盖已有规则） */
+    fun hasBookSourceRule(bookSource: BookSource): Boolean {
+        var searchRule = bookSource.ruleSearch
+        if (searchRule != null && !searchRule.bookList.isNullOrEmpty()) {
+            return true
+        }
+        var tocRule = bookSource.ruleToc
+        if (tocRule != null && !tocRule.chapterList.isNullOrEmpty()) {
+            return true
+        }
+        var contentRule = bookSource.ruleContent
+        if (contentRule != null && !contentRule.content.isNullOrEmpty()) {
+            return true
+        }
+        var infoRule = bookSource.ruleBookInfo
+        if (infoRule != null && !infoRule.name.isNullOrEmpty()) {
+            return true
+        }
+        return false
+    }
+
     /** 从请求体中读取管理员提交的授权用户列表（shareUsers），不存在时返回 null 表示不变更授权 */
     fun getShareUsersFromBody(context: RoutingContext): MutableList<String>? {
         var body: JsonObject? = null
@@ -186,6 +207,12 @@ class BookSourceController(coroutineContext: CoroutineContext): BaseController(c
         var bookSourceList = getSystemBookSourceJson()
         var existIndex: Int = findBookSourceIndex(bookSourceList, bookSource.bookSourceUrl)
         if (existIndex >= 0) {
+            // 防止前端拿到残缺书源（规则被包了一层 map 等情况）后保存，把已有规则覆盖成空
+            var oldSource = bookSourceList.getJsonObject(existIndex).mapTo(BookSource::class.java)
+            if (hasBookSourceRule(oldSource) && !hasBookSourceRule(bookSource)) {
+                logger.error("拒绝保存空规则书源: {}", bookSource.bookSourceUrl)
+                return returnData.setErrorMsg("书源规则为空，已阻止保存（避免覆盖已有规则）。请刷新页面重新加载书源后再编辑")
+            }
             var sourceList = bookSourceList.getList()
             sourceList.set(existIndex, JsonObject.mapFrom(bookSource))
             bookSourceList = JsonArray(sourceList)
