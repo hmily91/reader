@@ -82,6 +82,20 @@
             </el-switch>
           </template>
         </el-table-column>
+        <el-table-column property="role" label="管理员" min-width="80">
+          <template slot-scope="scope">
+            <el-switch
+              v-if="scope.row.userNS !== 'default'"
+              v-model="scope.row.role"
+              active-color="#13ce66"
+              inactive-color="#ff4949"
+              active-value="admin"
+              inactive-value="user"
+              @change="toggleUserRole(scope.row, $event)"
+            >
+            </el-switch>
+          </template>
+        </el-table-column>
         <el-table-column label="操作" width="100px">
           <template slot-scope="scope">
             <el-button type="text" @click="resetPassword(scope.row)"
@@ -275,9 +289,28 @@ export default {
         }
       );
     },
+    toggleUserRole(user, role) {
+      Axios.post(this.api + "/updateUser", {
+        username: user.username,
+        role
+      }).then(
+        res => {
+          if (res.data.isSuccess) {
+            this.$message.success("修改成功");
+            this.userList = res.data.data.map(v => ({
+              ...v,
+              userNS: v.username
+            }));
+          }
+        },
+        error => {
+          this.$message.error("修改失败 " + (error && error.toString()));
+        }
+      );
+    },
     async setAsDefaultBookSources(user) {
       const res = await this.$confirm(
-        `确认要将用户${user.username}的书源设为默认书源（新用户有效）吗?`,
+        `确认要将全部书源授权给用户${user.username}吗?`,
         "提示",
         {
           confirmButtonText: "确定",
