@@ -24,12 +24,32 @@ export function registerServiceWorker() {
             );
             const newVersion = process.env.VUE_APP_BUILD_VERSION;
             if (currentVersion !== newVersion) {
-              registration.active.postMessage({ type: "SKIP_WAITING" });
+              registration.active && registration.active.postMessage({ type: "SKIP_WAITING" });
               window.localStorage.setItem(
                 "READER_APP_BUILD_VERSION",
                 newVersion
               );
             }
+          }
+        },
+        // 检测到新版本：跳过等待并自动刷新一次，
+        // 否则用户会一直停留在 Service Worker 缓存的旧页面上（Ctrl+F5 也绕不过 SW）
+        updated(registration) {
+          try {
+            const newVersion = process.env.VUE_APP_BUILD_VERSION;
+            const reloadKey = "READER_APP_RELOADED_VERSION";
+            if (!window.localStorage) return;
+            if (window.localStorage.getItem(reloadKey) === newVersion) return;
+            window.localStorage.setItem(reloadKey, newVersion);
+            const worker = registration && (registration.waiting || registration.installing);
+            if (worker) {
+              worker.postMessage({ type: "SKIP_WAITING" });
+            }
+            setTimeout(function () {
+              window.location.reload();
+            }, 1500);
+          } catch (error) {
+            //
           }
         }
         // cached() {
