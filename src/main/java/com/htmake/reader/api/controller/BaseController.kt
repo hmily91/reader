@@ -41,6 +41,7 @@ import com.htmake.reader.SpringEvent
 import org.springframework.stereotype.Component
 import io.vertx.core.json.JsonObject
 import io.vertx.core.json.JsonArray
+import io.vertx.core.json.Json
 import io.vertx.core.http.HttpMethod
 import com.htmake.reader.api.ReturnData
 import io.legado.app.utils.MD5Utils
@@ -388,6 +389,46 @@ open class BaseController(override val coroutineContext: CoroutineContext): Coro
             }
         }
         saveStorage("data", "bookSourceGrants", value = plainMap)
+    }
+
+    /** 安全读取请求体中的 JSON 对象。
+     * 注意：不能直接用 context.bodyAsJson —— 当请求体是 JSON 数组时它会抛
+     * io.vertx.core.json.DecodeException: Invalid Json Object decoded as ...JsonArray，
+     * 导致批量导入书源直接失败。这里解析失败或类型不符一律返回 null。
+     */
+    fun getBodyJsonObject(context: RoutingContext): JsonObject? {
+        try {
+            var text = context.bodyAsString
+            if (text.isNullOrEmpty()) {
+                return null
+            }
+            var decoded: Any? = Json.decodeValue(text)
+            if (decoded is Map<*, *>) {
+                @Suppress("UNCHECKED_CAST")
+                return JsonObject(decoded as Map<String, Any>)
+            }
+            return null
+        } catch (e: Exception) {
+            return null
+        }
+    }
+
+    /** 安全读取请求体中的 JSON 数组，解析失败或类型不符返回 null */
+    fun getBodyJsonArray(context: RoutingContext): JsonArray? {
+        try {
+            var text = context.bodyAsString
+            if (text.isNullOrEmpty()) {
+                return null
+            }
+            var decoded: Any? = Json.decodeValue(text)
+            if (decoded is List<*>) {
+                @Suppress("UNCHECKED_CAST")
+                return JsonArray(decoded as List<Any>)
+            }
+            return null
+        } catch (e: Exception) {
+            return null
+        }
     }
 
     /** 系统书源（管理员维护的唯一数据源），位于 storage/data/default/bookSource.json */
