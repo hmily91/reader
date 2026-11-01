@@ -4,6 +4,10 @@
     <springProperty scope="context" name="logPath" source="logging.path" defaultValue="./logs" />
 
     <appender name="STDOUT" class="ch.qos.logback.core.ConsoleAppender">
+        <!-- 控制台只看 INFO 及以上：com.htmake.reader 的 debug 仍然只进文件，避免刷屏 -->
+        <filter class="ch.qos.logback.classic.filter.ThresholdFilter">
+            <level>INFO</level>
+        </filter>
         <encoder class="ch.qos.logback.classic.encoder.PatternLayoutEncoder">
             <Pattern>%d{yyyy-MM-dd HH:mm:ss} [%thread] %-5level %logger{36} - %msg%n</Pattern>
         </encoder>
@@ -38,7 +42,9 @@
 
 
     <springProfile name="prod">
+        <!-- 同时输出到控制台（docker logs / 面板「运行日志」）与滚动文件 -->
         <root level="INFO">
+            <appender-ref ref="STDOUT"/>
             <appender-ref ref="ASYNC_ROLLING_FILE"/>
         </root>
     </springProfile>
