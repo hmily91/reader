@@ -47,6 +47,30 @@
       :top="$store.state.miniInterface ? '0' : '10vh'"
       :fullscreen="$store.state.miniInterface"
     >
+      <div
+        v-if="editorShareUsers"
+        class="share-user-wrapper"
+      >
+        <span class="share-user-label">授权用户：</span>
+        <el-select
+          v-model="editorShareUsers"
+          multiple
+          filterable
+          clearable
+          collapse-tags
+          size="medium"
+          class="share-user-select"
+          placeholder="默认不对任何普通用户开放"
+        >
+          <el-option
+            v-for="(item, index) in editorUserOptions"
+            :key="'share-user-' + index"
+            :label="item.username"
+            :value="item.username"
+          >
+          </el-option>
+        </el-select>
+      </div>
       <div class="code-editor language-json" ref="editorRef"></div>
       <div slot="footer" class="dialog-footer">
         <el-button size="medium" @click="closeEditor">取 消</el-button>
@@ -215,6 +239,9 @@ export default {
       showEditor: false,
       editorTitle: "编辑器",
       editorContent: "",
+      // 书源授权用户（null 表示不展示授权控件）
+      editorShareUsers: null,
+      editorUserOptions: [],
 
       showReplaceRuleDialog: false,
 
@@ -609,11 +636,16 @@ export default {
         }
       );
     },
-    showEditorListener(title, content, callback) {
+    showEditorListener(title, content, callback, options) {
       this.editorTitle = title;
       this.editorContent = content;
       this.showEditor = true;
       this.callback = callback;
+      // options: { shareUsers: [...], users: [...] } 仅书源编辑时传入
+      this.editorShareUsers =
+        options && Array.isArray(options.shareUsers) ? options.shareUsers : null;
+      this.editorUserOptions =
+        options && Array.isArray(options.users) ? options.users : [];
       this.$nextTick(() => {
         this.initEditor();
       });
@@ -835,13 +867,19 @@ export default {
       this.showEditor = false;
       this.editorTitle = "";
       this.editorContent = "";
+      this.editorShareUsers = null;
+      this.editorUserOptions = [];
       this.callback = null;
     },
     saveEditor() {
       if (this.callback) {
-        this.callback(this.editorContent, () => {
-          this.closeEditor();
-        });
+        this.callback(
+          this.editorContent,
+          () => {
+            this.closeEditor();
+          },
+          this.editorShareUsers ? this.editorShareUsers.slice() : null
+        );
       }
     },
     closeViewer() {
@@ -861,6 +899,25 @@ export default {
   height: 100%;
   /* height: calc(100% + var(--status-bar-height, 0px)); */
   position: relative;
+}
+
+.share-user-wrapper {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+
+  .share-user-label {
+    font-size: 14px;
+    color: #606266;
+    margin-right: 8px;
+    flex-shrink: 0;
+  }
+
+  .share-user-select {
+    flex: 1;
+    min-width: 220px;
+  }
 }
 
 @font-face {
