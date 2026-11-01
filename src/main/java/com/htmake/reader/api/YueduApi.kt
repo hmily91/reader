@@ -89,6 +89,9 @@ class YueduApi : RestVerticle() {
         // 旧版数据迁移
         migration()
 
+        // 书源授权迁移（旧版本每个用户各持一份书源副本，新版改为系统书源 + 授权表）
+        migrateBookSourceGrant()
+
         // web界面
         router.route("/*").handler(StaticHandler.create("web").setDefaultContentEncoding("UTF-8"));
 
@@ -159,6 +162,9 @@ class YueduApi : RestVerticle() {
         router.post("/reader3/setAsDefaultBookSources").coroutineHandler { bookSourceController.setAsDefaultBookSources(it) }
         router.post("/reader3/deleteUserBookSource").coroutineHandler { bookSourceController.deleteUserBookSource(it) }
         router.post("/reader3/deleteBookSourcesFile").coroutineHandler { bookSourceController.deleteBookSourcesFile(it) }
+
+        // 书源授权（仅管理员，指定书源开放给哪些用户）
+        router.post("/reader3/saveBookSourceGrants").coroutineHandler { bookSourceController.saveBookSourceGrants(it) }
 
         /** 书籍模块 */
         // 书架
@@ -376,6 +382,143 @@ class YueduApi : RestVerticle() {
         } catch(e: Exception) {
             e.printStackTrace()
         }
+    }
+
+    /**
+     * 书源授权迁移（仅执行一次）
+     *
+     * 旧版本：每个用户各自持有一份书源副本（storage/data/<user>/bookSource.json），
+     *         新用户会从系统书源拷贝一份，因此无法做权限隔离。
+     * 新版本：书源统一维护在系统空间（storage/data/default/bookSource.json），
+     *         普通用户通过授权表（storage/data/bookSourceGrants.json）控制可见性。
+     *
+     * 首次升级时：
+     *   1. 把各用户已有的书源合并进系统书源（按 bookSourceUrl 去重）
+     *   2. 按"原来谁有这本书源，就继续授权给谁"初始化授权表，避免升级后书源丢失
+     *   3. 用户原有书源副本重命名备份为 bookSource.json.migrated-<时间戳>，不删除
+     *   4. 保证升级后至少存在一个管理员，否则无人能管理书源
+     */
+    suspend fun migrateBookSourceGrant() {
+        try {
+            if (!appConfig.secure) {
+                return
+            }
+            var grantFile = File(getWorkDir("storage", "data", "bookSourceGrants.json"))
+            if (grantFile.exists()) {
+                return
+            }
+            // 用户列表
+            var userMap = mutableMapOf<String, MutableMap<String, Any>>()
+            var userMapJson: JsonObject? = asJsonObject(getStorage("data", "users"))
+            if (userMapJson != null) {
+                userMap = userMapJson.map as MutableMap<String, MutableMap<String, Any>>
+            }
+            var merged = JsonArray()
+            var urlSet = mutableSetOf<String>()
+            var grantMap = mutableMapOf<String, MutableList<String>>()
+
+            // 系统书源先入库
+            var systemList: JsonArray? = asJsonArray(getStorage("data", "default", "bookSource"))
+            if (systemList != null) {
+                for (i in 0 until systemList.size()) {
+                    addMergedBookSource(merged, urlSet, systemList.getJsonObject(i))
+                }
+            }
+
+            userMap.forEach {
+                var username = it.value.getOrDefault("username", "") as? String ?: ""
+                if (username.isEmpty()) {
+                    return@forEach
+                }
+                var userBookSourceList: JsonArray? = asJsonArray(getStorage("data", username, "bookSource"))
+                if (userBookSourceList != null) {
+                    for (i in 0 until userBookSourceList.size()) {
+                        var bookSourceObject = userBookSourceList.getJsonObject(i)
+                        var bookSourceUrl = bookSourceObject.getString("bookSourceUrl") ?: ""
+                        if (bookSourceUrl.isEmpty()) {
+                            continue
+                        }
+                        addMergedBookSource(merged, urlSet, bookSourceObject)
+                        var userList = grantMap.get(bookSourceUrl) ?: mutableListOf<String>()
+                        if (!userList.contains(username)) {
+                            userList.add(username)
+                        }
+                        grantMap.put(bookSourceUrl, userList)
+                    }
+                }
+                // 备份用户书源副本，避免误删数据
+                var userBookSourceFile = File(getWorkDir("storage", "data", username, "bookSource.json"))
+                if (userBookSourceFile.exists()) {
+                    userBookSourceFile.renameTo(File(getWorkDir("storage", "data", username, "bookSource.json.migrated-" + System.currentTimeMillis())))
+                }
+            }
+
+            if (merged.size() > 0) {
+                saveStorage("data", "default", "bookSource", value = merged)
+            }
+
+            // 保证升级后至少存在一个管理员
+            var hasAdmin = false
+            userMap.forEach {
+                var role = it.value.getOrDefault("role", "") as? String ?: ""
+                if (role.equals("admin")) {
+                    hasAdmin = true
+                }
+            }
+            if (!hasAdmin && userMap.size > 0) {
+                var oldestUsername = ""
+                var oldestTime = Long.MAX_VALUE
+                userMap.forEach {
+                    var createdAt = it.value.getOrDefault("created_at", 0L)
+                    var createdTime = if (createdAt is Long) createdAt else 0L
+                    if (createdTime <= oldestTime) {
+                        oldestTime = createdTime
+                        oldestUsername = it.value.getOrDefault("username", "") as? String ?: ""
+                    }
+                }
+                if (oldestUsername.isNotEmpty()) {
+                    var adminUser = userMap.get(oldestUsername)
+                    if (adminUser != null) {
+                        adminUser.put("role", "admin")
+                        userMap.put(oldestUsername, adminUser)
+                    }
+                }
+                saveStorage("data", "users", value = userMap)
+            }
+
+            saveStorage("data", "bookSourceGrants", value = grantMapToJson(grantMap).map)
+            logger.info("书源授权迁移完成: 系统书源 {} 条, 授权记录 {} 条", merged.size(), grantMap.size)
+        } catch(e: Exception) {
+            logger.error("书源授权迁移失败", e)
+        }
+    }
+
+    fun addMergedBookSource(merged: JsonArray, urlSet: MutableSet<String>, bookSourceObject: JsonObject?) {
+        if (bookSourceObject == null) {
+            return
+        }
+        var bookSourceUrl = bookSourceObject.getString("bookSourceUrl") ?: ""
+        if (bookSourceUrl.isEmpty() || urlSet.contains(bookSourceUrl)) {
+            return
+        }
+        urlSet.add(bookSourceUrl)
+        merged.add(bookSourceObject)
+    }
+
+    fun grantMapToJson(grantMap: Map<String, List<String>>): JsonObject {
+        var grantJson = JsonObject()
+        grantMap.forEach {
+            if (it.key.isNotEmpty()) {
+                var userArray = JsonArray()
+                for (name in it.value) {
+                    if (name.isNotEmpty()) {
+                        userArray.add(name)
+                    }
+                }
+                grantJson.put(it.key, userArray)
+            }
+        }
+        return grantJson
     }
 
     override fun started() {
