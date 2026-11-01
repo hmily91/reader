@@ -141,7 +141,7 @@
           <div class="setting-title">
             后端设定
           </div>
-          <div class="setting-item">
+          <div class="setting-item setting-item-inline">
             <el-tag
               :type="connectType"
               :effect="isNight ? 'dark' : 'light'"
@@ -1144,6 +1144,16 @@ import Vue from "vue";
 
 // 后端不可用时兜底展示的更新日志（与 src/main/resources/updateLog.json 保持一致）
 const DEFAULT_UPDATE_LOG = [
+  {
+    version: "2.6.2",
+    date: "2026-11-01",
+    contents: [
+      "修复书源授权「保存后不生效」：授权表落盘时被写成 {\"list\":[...]} 格式，再读回来解析不到用户名",
+      "修复书源列表 shareUsers 返回格式错误，导致「授权用户」列一直显示「仅管理员」、编辑页勾选也不回显",
+      "书源接口返回值改为标准 JSON 对象（原来会多包一层 map / list）",
+      "侧边栏「更新日志」与「后端已连接」标签对齐"
+    ]
+  },
   {
     version: "2.6.1",
     date: "2026-11-01",
@@ -3426,12 +3436,24 @@ export default {
 
       .setting-item {
         padding-top: 16px;
+
+        // 状态标签与按钮标签混排时用 flex 对齐（避免 overflow:hidden 改变基线导致错位）
+        &.setting-item-inline {
+          display: flex;
+          flex-direction: row;
+          flex-wrap: wrap;
+          align-items: center;
+        }
       }
 
       .setting-btn {
         margin-right: 15px;
         margin-bottom: 15px;
         cursor: pointer;
+      }
+
+      .setting-item-inline .setting-btn {
+        margin-bottom: 0;
       }
 
       .setting-select {
