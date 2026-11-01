@@ -973,6 +973,7 @@
         >
           <div class="update-log-head">
             <span class="update-log-version">v{{ item.version }}</span>
+            <span class="update-log-gap"></span>
             <span class="update-log-date">{{ item.date }}</span>
           </div>
           <ul class="update-log-list">
@@ -1136,6 +1137,16 @@ import Vue from "vue";
 
 // 后端不可用时兜底展示的更新日志（与 src/main/resources/updateLog.json 保持一致）
 const DEFAULT_UPDATE_LOG = [
+  {
+    version: "2.6.6",
+    date: "2026-11-01",
+    contents: [
+      "容器「运行日志」面板现在有日志输出：生产环境日志同时写控制台（原来只写文件），控制台只打印 INFO 及以上，避免 debug 刷屏",
+      "启动完成后会打印访问端口 / 运行环境 / 数据目录 / 日志目录，之后每 30 分钟输出一条运行状态（内存、线程数）",
+      "更新日志弹窗：版本号与日期之间加弹性间隔，日期改为靠右的灰色标签，不会再和版本号连在一起",
+      "修复升级镜像后仍显示旧页面：检测到新版本会自动跳过等待并刷新一次（Service Worker 缓存导致 Ctrl+F5 也不生效）"
+    ]
+  },
   {
     version: "2.6.5",
     date: "2026-11-01",
@@ -3852,20 +3863,33 @@ export default {
       flex-direction: row;
       align-items: center;
       justify-content: space-between;
-      margin-bottom: 4px;
+      margin-bottom: 6px;
     }
 
     .update-log-version {
       font-size: 16px;
       font-weight: 600;
+      flex-shrink: 0;
       margin-right: 10px;
     }
 
+    /* 撑开版本号与日期之间的空隙：即使外层 flex 没生效，日期也不会紧贴版本号 */
+    .update-log-gap {
+      flex: 1 1 auto;
+      min-width: 12px;
+      height: 1px;
+    }
+
     .update-log-date {
+      float: right; /* 兜底：flex 失效时仍把日期推到最右 */
       font-size: 12px;
       color: #909399;
       margin-left: auto;
       flex-shrink: 0;
+      padding: 2px 8px;
+      border-radius: 10px;
+      background: rgba(144, 147, 153, 0.16);
+      white-space: nowrap;
     }
 
     .update-log-list {
