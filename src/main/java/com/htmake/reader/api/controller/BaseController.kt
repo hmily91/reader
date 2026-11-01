@@ -398,16 +398,23 @@ open class BaseController(override val coroutineContext: CoroutineContext): Coro
      */
     fun getBodyJsonObject(context: RoutingContext): JsonObject? {
         try {
+            var body = context.bodyAsJson
+            if (body != null) {
+                return body
+            }
+        } catch (e: Exception) {
+            // 请求体是数组时会抛 DecodeException，继续走下面的兜底解析
+        }
+        try {
             var text = context.bodyAsString
-            if (text.isNullOrEmpty()) {
+            if (text.isNullOrBlank()) {
                 return null
             }
-            var decoded: Any? = Json.decodeValue(text)
-            if (decoded is Map<*, *>) {
-                @Suppress("UNCHECKED_CAST")
-                return JsonObject(decoded as Map<String, Any>)
+            var trimmed = text.trim()
+            if (!trimmed.startsWith("{")) {
+                return null
             }
-            return null
+            return JsonObject(trimmed)
         } catch (e: Exception) {
             return null
         }
@@ -416,16 +423,23 @@ open class BaseController(override val coroutineContext: CoroutineContext): Coro
     /** 安全读取请求体中的 JSON 数组，解析失败或类型不符返回 null */
     fun getBodyJsonArray(context: RoutingContext): JsonArray? {
         try {
+            var body = context.bodyAsJsonArray
+            if (body != null) {
+                return body
+            }
+        } catch (e: Exception) {
+            // 请求体是对象时会抛 DecodeException，继续走下面的兜底解析
+        }
+        try {
             var text = context.bodyAsString
-            if (text.isNullOrEmpty()) {
+            if (text.isNullOrBlank()) {
                 return null
             }
-            var decoded: Any? = Json.decodeValue(text)
-            if (decoded is List<*>) {
-                @Suppress("UNCHECKED_CAST")
-                return JsonArray(decoded as List<Any>)
+            var trimmed = text.trim()
+            if (!trimmed.startsWith("[")) {
+                return null
             }
-            return null
+            return JsonArray(trimmed)
         } catch (e: Exception) {
             return null
         }
