@@ -14,7 +14,8 @@ services:
       - SPRING_PROFILES_ACTIVE=prod
       - READER_APP_STORAGEPATH=/storage  # 必须显式指定，否则数据会落到容器内 /app 而非挂载卷
       - LOGGING_PATH=/logs
-      - JAVA_OPTS=-XX:+UseContainerSupport -XX:MaxRAMPercentage=75.0 -XX:+ExitOnOutOfMemoryError
+      # 末尾 4 个 -D 是 JVM 全局代理：走代理后 DNS 由代理解析，可绕过域名污染
+      - JAVA_OPTS=-XX:+UseContainerSupport -XX:MaxRAMPercentage=75.0 -XX:+ExitOnOutOfMemoryError -Dhttp.proxyHost=192.168.31.2 -Dhttp.proxyPort=7890 -Dhttps.proxyHost=192.168.31.2 -Dhttps.proxyPort=7890
       - READER_APP_USERLIMIT=10  # 用户上限,默认且最大值为50
       - READER_APP_USERBOOKLIMIT=1000  # 用户书籍上限,默认200
       - READER_APP_CACHECHAPTERCONTENT=true # 开启缓存章节内容
