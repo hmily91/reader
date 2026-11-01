@@ -1145,6 +1145,14 @@ import Vue from "vue";
 // 后端不可用时兜底展示的更新日志（与 src/main/resources/updateLog.json 保持一致）
 const DEFAULT_UPDATE_LOG = [
   {
+    version: "2.6.4",
+    date: "2026-11-01",
+    contents: [
+      "修复「导入书源」报错 io.vertx.core.json.DecodeException：批量导入接口误用了 context.bodyAsJson，请求体是数组时会直接抛异常",
+      "请求体解析统一改为安全读取（数组/对象都能识别，解析失败返回 null 而不是抛错）"
+    ]
+  },
+  {
     version: "2.6.3",
     date: "2026-11-01",
     contents: [
