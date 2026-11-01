@@ -240,14 +240,15 @@ export default new Vuex.Store({
       setCache("api_token", token);
     },
     setBookSourceList(state, list) {
-      // 过滤一下不用的字段，省点内存
+      // 过滤一下不用的字段，省点内存（shareUsers 要保留，书源管理列表要用它显示授权情况）
       state.bookSourceList = list.map(v => {
         return {
           bookSourceGroup: v.bookSourceGroup,
           bookSourceName: v.bookSourceName,
           bookSourceType: v.bookSourceType,
           bookSourceUrl: v.bookSourceUrl,
-          exploreUrl: v.exploreUrl
+          exploreUrl: v.exploreUrl,
+          shareUsers: Array.isArray(v.shareUsers) ? v.shareUsers : []
         };
       });
     },
