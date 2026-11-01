@@ -3,6 +3,11 @@
 > 本文件与 `src/main/resources/updateLog.json` 保持同步；前端「更新日志」弹窗展示的就是该文件内容。
 > 若不想重新构建镜像，可在 `storage/data/updateLog.json` 放同名文件覆盖（重启后生效）。
 
+## v2.6.4（2026-11-01）
+
+- 修复「导入书源」报错 io.vertx.core.json.DecodeException：批量导入接口误用了 context.bodyAsJson，请求体是数组时会直接抛异常
+- 请求体解析统一改为安全读取（数组/对象都能识别，解析失败返回 null 而不是抛错）
+
 ## v2.6.3（2026-11-01）
 
 - 修复书源规则被清空导致「搜不到书」：2.6.0 / 2.6.1 的 `getBookSource` 把规则多包了一层 `map`，
